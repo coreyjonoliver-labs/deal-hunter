@@ -45,7 +45,10 @@ def secret_destinations(settings: Settings) -> list[str]:
     if "ntfy_server" in fields:
         hosts.append(f"ntfy topic -> {urlparse(str(fields['ntfy_server'])).hostname}")
     if "email" in fields:
-        domain = str(fields["email"]).rsplit("@", 1)[-1]
+        # aimm's default host: smtp.<the sender's domain>, the sender being
+        # smtp_username if set (settings never set smtp_from).
+        sender = str(fields.get("smtp_username") or fields["email"])
+        domain = sender.rsplit("@", 1)[-1]
         hosts.append(f"SMTP password -> {fields.get('smtp_server', f'smtp.{domain}')}")
     return hosts
 

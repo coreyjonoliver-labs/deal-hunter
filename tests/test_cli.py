@@ -437,3 +437,21 @@ def test_attended_run_only_warns_about_aimm_config(
     mine.write_text("# the user's own\n")
     main(["-s", str(settings), "run", "-o", str(tmp_path / "c.toml")])
     assert mine.exists() and "will be merged" in capsys.readouterr().err
+
+
+def test_undeletable_aimm_config_doesnt_stop_an_unattended_run(
+    tmp_path: Path,
+    aimm_calls: list[tuple[list[str], object]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from fakes import LOGIN_COOKIE, FakeContext
+
+    from deal_hunter import session
+    from deal_hunter.session import save
+
+    (session.AIMM_HOME / "config.toml").mkdir()  # launch makes aimm ignore it
+    fb = tmp_path / "fb.json"
+    save(FakeContext([LOGIN_COOKIE]), fb)
+    s = write_settings(tmp_path / "s.toml", f'session_file = "{fb}"\nrequire_session = true\n')
+    assert main(["-s", str(s), "run", "-o", str(tmp_path / "c.toml")]) == 0
+    assert "Ignoring" in capsys.readouterr().err and aimm_calls

@@ -340,10 +340,13 @@ def _start(
     if os.path.lexists(aimm_config):
         if settings.require_session:
             # Unattended, no one put it there on purpose, but a browser exploit
-            # could have: aimm merges it into every run, so an [ai] base_url
-            # there would receive the API key on every restart.
-            aimm_config.unlink()
-            _record(f"Deleted {aimm_config}: aimm would have merged it into this run.")
+            # could have. launch makes aimm ignore it; this just clears it out
+            # and makes it visible.
+            try:
+                aimm_config.unlink()
+                _record(f"Deleted {aimm_config} (not used for unattended runs).")
+            except OSError as e:
+                _record(f"Ignoring {aimm_config} (not used for unattended runs): {e.strerror}.")
         else:
             print(
                 f"warning: {aimm_config} exists and will be merged into this run; "

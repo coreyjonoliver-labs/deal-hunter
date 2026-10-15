@@ -6,6 +6,7 @@ import hashlib
 import inspect
 import logging
 import os
+import types
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -116,6 +117,7 @@ def test_main_patches_then_runs_aimm(
         (facebook.FacebookMarketplace, "login"),
         (facebook.FacebookMarketplace, "search"),
         (monitor.MarketplaceMonitor, "_launch_browser"),
+        (monitor.MarketplaceMonitor, "__init__"),
     ]:
         monkeypatch.setattr(cls, name, getattr(cls, name))
     monkeypatch.setattr(launch, "SESSION", None)
@@ -137,6 +139,7 @@ def test_main_patches_then_runs_aimm(
     assert facebook.FacebookMarketplace.login is launch.login_with_session
     assert facebook.FacebookMarketplace.search is launch.search_with_session
     assert monitor.MarketplaceMonitor._launch_browser is launch.launch_browser
+    assert monitor.MarketplaceMonitor.__init__ is launch.monitor_init
     assert launch.SESSION == sess and launch.SANDBOX is False
     assert os.umask(0o022) == 0o077  # files aimm writes are owner-only
     monitor_logger = logging.getLogger("monitor")
@@ -612,3 +615,25 @@ def test_failed_backup_exclusion_warns_once(
     market = logged_in_market(monkeypatch, saved, required=False)
     launch._save(market, launch.SESSION)  # type: ignore[arg-type]
     assert caplog.text.count("Time Machine") == 1
+
+
+@pytest.mark.parametrize("required", [True, False])
+def test_home_config_ignored_only_when_unattended(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, required: bool
+) -> None:
+    home_config = utils.amm_home / "config.toml"
+    ours = tmp_path / "aimm-config.toml"
+
+    def upstream(self: Any, config_files: Any, headless: Any, logger: Any) -> None:
+        self.config_files = [home_config, *config_files]  # what aimm does when it exists
+
+    monkeypatch.setattr(launch, "_upstream_monitor_init", upstream)
+    monkeypatch.setattr(launch, "SESSION", Session(tmp_path / "s.json", required=required))
+    m = types.SimpleNamespace()
+    launch.monitor_init(m, [ours], True, None)
+    assert m.config_files == ([ours] if required else [home_config, ours])
+
+
+def test_monitor_init_signature_is_unchanged() -> None:
+    params = list(inspect.signature(launch._upstream_monitor_init).parameters)
+    assert params == ["self", "config_files", "headless", "logger"]

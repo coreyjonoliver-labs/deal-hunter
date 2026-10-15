@@ -1,4 +1,4 @@
-"""Start ai-marketplace-monitor with three fixes applied to the pinned release.
+"""Start ai-marketplace-monitor with fixes applied to the pinned release.
 
 1. URLs are hidden from its keyword filters. aimm's keyword and antikeyword
    filters are a plain substring test over title + description, so "nuc"
@@ -26,8 +26,14 @@
    ~/.ai-marketplace-monitor, so everything aimm writes (its log, cache and
    debug_*.html page dumps, which show a logged-in page) is owner-only.
 
+5. Unattended, aimm's home config is ignored. aimm merges
+   ``~/.ai-marketplace-monitor/config.toml`` into every run; with
+   facebook.require_session nothing legitimate writes it, and a browser
+   exploit could plant one (an [ai] base_url there would receive the API
+   key). Deleting it at start can be raced, so aimm never reads it.
+
 ``deal-hunter run`` starts aimm through ``main`` in the same process, which
-applies all four. aimm is pinned, and tests/test_launch.py checks the patch points
+applies all five. aimm is pinned, and tests/test_launch.py checks the patch points
 still exist.
 
 This deliberately has no ``python -m`` entry: ``-m`` puts the current
@@ -46,7 +52,8 @@ from logging import Logger
 from typing import Any
 
 from ai_marketplace_monitor.facebook import FacebookMarketplace
-from ai_marketplace_monitor.utils import aimm_event, is_substring
+from ai_marketplace_monitor.monitor import MarketplaceMonitor
+from ai_marketplace_monitor.utils import aimm_event, amm_home, is_substring
 from playwright.sync_api import Error as PlaywrightError
 
 from deal_hunter import events
@@ -102,6 +109,7 @@ def goto_url_with_timeout(self: Any, url: str, attempt: int = 0) -> None:
 # Set by main. SESSION None = aimm's own login only.
 SESSION: Session | None = None
 SANDBOX = True
+_upstream_monitor_init = MarketplaceMonitor.__init__
 _upstream_login = FacebookMarketplace.login
 _upstream_search = FacebookMarketplace.search
 
@@ -133,6 +141,14 @@ def create_page_with_session(self: Any, swap_proxy: bool = False) -> Any:
             options["storage_state"] = fb_session.facebook_only(state)
         self.page = self.browser.new_context(**options).new_page()
     return self.page
+
+
+def monitor_init(self: Any, config_files: Any, headless: Any, logger: Any) -> None:
+    """MarketplaceMonitor.__init__, without aimm's home config.toml when unattended."""
+    _upstream_monitor_init(self, config_files, headless, logger)
+    if SESSION is not None and SESSION.required:
+        home_config = amm_home / "config.toml"  # the path upstream adds
+        self.config_files = [f for f in self.config_files if f != home_config]
 
 
 def launch_browser(self: Any) -> Any:
@@ -264,4 +280,5 @@ def main(args: list[str], session: Session | None = None, sandbox: bool = True) 
     facebook.FacebookMarketplace.login = login_with_session  # type: ignore[method-assign]
     facebook.FacebookMarketplace.search = search_with_session  # type: ignore[method-assign,assignment]
     monitor.MarketplaceMonitor._launch_browser = launch_browser  # type: ignore[method-assign]
+    monitor.MarketplaceMonitor.__init__ = monitor_init  # type: ignore[method-assign]
     app(args=args, prog_name="ai-marketplace-monitor")

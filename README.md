@@ -357,7 +357,7 @@ read what's generated.
 - ai-marketplace-monitor **also** reads `~/.ai-marketplace-monitor/config.toml`
   if it exists, and merges it in. Keep that file empty or remove it, or its
   items will run too. With `facebook.require_session` (unattended), `run`
-  deletes it at every start: nothing legitimate writes it there, and a
+  ignores it and deletes it: nothing legitimate writes it there, and a
   compromised browser could.
 - Searches run every 1–2 hours by default. Shorter intervals and more search
   phrases get the account throttled faster.

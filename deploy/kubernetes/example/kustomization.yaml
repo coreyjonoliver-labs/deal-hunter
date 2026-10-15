@@ -20,7 +20,9 @@ images:
     newTag: "0.2.0"
     # digest: sha256:...   # pin it; the tag moves with every build of main
 patches:
-  # The host name your authenticating proxy serves the dashboard on.
+  # The host name your authenticating proxy serves the dashboard on. This
+  # replaces the whole list: keep it in step with base/deployment.yaml's
+  # web args when you update the base.
   - patch: |-
       apiVersion: apps/v1
       kind: Deployment
