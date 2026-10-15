@@ -36,14 +36,15 @@ radius for a compromised browser.
 
 ## Phase 3 — Alerting & observability
 
-Objective: the buyer hears about good deals where they already look, and the
-operator hears when the monitor stops working — not only when its pod dies.
+Objective: the buyer hears about good deals where they already look. For now
+alerting is scoped to that (operator decision, 2026-10-15); the operator-health
+specs (ops-metrics, otel-tracing) are written and deferred.
 
 | Spec | Depends on | Status |
 |---|---|---|
 | [discord-deal-alerts](specs/discord-deal-alerts.md) | None | Ready |
-| [ops-metrics](specs/ops-metrics.md) | None | Ready |
-| [otel-tracing](specs/otel-tracing.md) | ops-metrics | Ready |
+| [ops-metrics](specs/ops-metrics.md) | None | Ready (deferred) |
+| [otel-tracing](specs/otel-tracing.md) | ops-metrics | Ready (deferred) |
 
 <!--
 Add phases as the project grows. A phase is just a grouping for sequencing; the

@@ -57,7 +57,17 @@ The settled choices. Follow them; don't relitigate them in a change.
 5. **Generic deployment lives here; personal deployment doesn't.** `deploy/`
    is for any self-hoster; nothing specific to one person's location or
    cluster is ever committed.
-6. **Specs are the source of truth.** Every non-trivial unit of work is defined
+6. **Configuration is code; data goes in a database only when a feature
+   needs it.** Intent (watches, budgets, thresholds, AI, notification routing,
+   schedules) lives in the TOML, validated and reviewed in git — no UI or bot
+   writes it. Secrets come only from env; process wiring (ports, hosts,
+   paths, endpoints) from flags and env. A deal-hunter-owned database is added
+   only with the first feature that needs runtime data, and runtime data may
+   only narrow behavior (dismiss, mute) and must expire or be visible — it
+   never redefines intent. The first input channel, when one is needed, is the
+   dashboard (which makes `web` read-write: writable volume, CSRF, trusted
+   identity). Detail: the conventions skill, "Configuration model".
+7. **Specs are the source of truth.** Every non-trivial unit of work is defined
    by exactly one spec in `docs/specs/`. The roadmap sequences specs; it is not a
    competing plan.
 
