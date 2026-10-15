@@ -210,3 +210,21 @@ def test_shipped_settings_hold_no_location() -> None:
         data = tomllib.loads(path.read_text())
         assert data["location"]["search_city"] == "CHANGE_ME", path
         assert "seller_locations" not in data["location"], path
+
+
+@pytest.mark.parametrize(
+    ("notify", "message"),
+    [
+        ({"smtp_username": "x@evil.example@gmail.com"}, "more than one '@'"),
+        ({"smtp_username": "apikey"}, "smtp_server is required"),
+    ],
+)
+def test_smtp_username_must_name_one_host(
+    base_settings: dict[str, Any], notify: dict[str, str], message: str
+) -> None:
+    base_settings["notify"] = {"methods": ["email"], "email": "me@example.org", **notify}
+    with pytest.raises(SettingsError, match=message):
+        parse_settings(base_settings)
+    base_settings["notify"]["smtp_server"] = "smtp.example.org"
+    if "@" not in notify["smtp_username"]:
+        assert parse_settings(base_settings).notify.fields["smtp_username"] == "apikey"
