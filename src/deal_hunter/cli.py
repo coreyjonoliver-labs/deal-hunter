@@ -28,7 +28,6 @@ DEFAULT_SETTINGS = Path("deal-hunter.toml")
 # The settings file's name before the project was renamed.
 LEGACY_SETTINGS = Path("nuc-hunter.toml")
 DEFAULT_OUTPUT = Path("build/aimm-config.toml")
-AIMM_HOME_CONFIG = Path.home() / ".ai-marketplace-monitor" / "config.toml"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -335,12 +334,22 @@ def _start(
 
     if aimm_args and aimm_args[0] == "--":
         aimm_args = aimm_args[1:]
-    if AIMM_HOME_CONFIG.exists():
-        print(
-            f"warning: {AIMM_HOME_CONFIG} exists and will be merged into this run; "
-            "its items, AI keys and notifiers apply too.",
-            file=sys.stderr,
-        )
+    from deal_hunter import session as fb_session
+
+    aimm_config = fb_session.AIMM_HOME / "config.toml"
+    if os.path.lexists(aimm_config):
+        if settings.require_session:
+            # Unattended, no one put it there on purpose, but a browser exploit
+            # could have: aimm merges it into every run, so an [ai] base_url
+            # there would receive the API key on every restart.
+            aimm_config.unlink()
+            _record(f"Deleted {aimm_config}: aimm would have merged it into this run.")
+        else:
+            print(
+                f"warning: {aimm_config} exists and will be merged into this run; "
+                "its items, AI keys and notifiers apply too.",
+                file=sys.stderr,
+            )
     # aimm's web UI is on by default and unauthenticated on loopback: any web
     # page could read its log stream, and via DNS rebinding edit the config to
     # send ${API_KEY} values elsewhere. Keep it off unless asked for.

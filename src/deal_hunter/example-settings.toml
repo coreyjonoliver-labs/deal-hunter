@@ -36,7 +36,8 @@ adapter must be included.\
 # name = "standing desk"
 # search_phrases = ["standing desk", "sit stand desk"]
 # # A listing must mention one of these to reach the AI. Leave it out and the
-# # AI rates everything the searches find (costs more, misses less).
+# # AI rates everything the searches find (costs more, misses less). On a
+# # preset watch, keywords replaces the preset's list; [] turns the gate off.
 # keywords = ["desk"]
 # antikeywords = ["kids", "desk lamp"]
 # min_price = 50

@@ -574,3 +574,26 @@ def test_watches_have_their_own_rating_and_filter(
     assert "at each watch's rating" in page
     unknown = dashboard.render_page(snap, settings, "rated", "<script>")
     assert "Beelink" in unknown and "<script>" not in unknown
+
+
+def test_rating_watch_decides_and_best_rating_wins(
+    base_settings: dict[str, Any], tmp_path: Path
+) -> None:
+    base_settings["search"] = {}
+    base_settings["watch"] = [
+        {"name": "nuc", "preset": "mini-pc", "max_price": 400},
+        {"name": "cheap pc", "search_phrases": ["pc"], "max_price": 100},
+    ]
+    base_settings["facebook"] = {"session_file": str(tmp_path / "fb.json")}
+    settings = parse_settings(base_settings)
+    home = tmp_path / "aimm"
+    home.mkdir()
+    with Cache(str(home)) as cache:
+        both = listing("1", "Beelink mini pc", price="$90")
+        put(cache, both, 3, "ok", watch="nuc")
+        put(cache, both, 5, "steal", watch="cheap pc")
+        # Rated when it was cheaper; the price now fails cheap pc but passes nuc.
+        put(cache, listing("2", "Beelink EQ12", price="$150"), 4, watch="cheap pc")
+    by_id = {r.id: r for r in dashboard.collect(settings, home, NOW).results}
+    assert (by_id["1"].watch, by_id["1"].score, by_id["1"].comment) == ("cheap pc", 5, "steal")
+    assert by_id["2"].watch == "cheap pc" and by_id["2"].dropped == ["price outside 0-100"]

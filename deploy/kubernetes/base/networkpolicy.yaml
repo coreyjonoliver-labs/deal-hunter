@@ -40,12 +40,22 @@ spec:
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
+            # Private, shared, link-local (cloud metadata) and reserved
+            # ranges. Add your own public ingress, load balancer and node
+            # IPs in your overlay: hairpinned requests to them can arrive
+            # with an internal source address and pass "internal only"
+            # allowlists. IPv6 egress isn't allowed at all; if you add
+            # ::/0, except fc00::/7, fe80::/10 and ::1/128.
             except:
+              - 0.0.0.0/8
               - 10.0.0.0/8
-              - 172.16.0.0/12
-              - 192.168.0.0/16
               - 100.64.0.0/10
-              - 169.254.0.0/16
               - 127.0.0.0/8
+              - 169.254.0.0/16
+              - 172.16.0.0/12
+              - 192.0.0.0/24
+              - 192.168.0.0/16
+              - 198.18.0.0/15
+              - 240.0.0.0/4
       ports:
         - {protocol: TCP, port: 443}

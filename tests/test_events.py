@@ -222,3 +222,12 @@ def test_events_path_prefers_the_new_file(tmp_path: Path) -> None:
     (tmp_path / events.EVENTS_NAME).write_text("new\n")
     assert events.events_path(tmp_path, migrate=True) == tmp_path / events.EVENTS_NAME
     assert (tmp_path / events.LEGACY_EVENTS_NAME).read_text() == "old\n"
+
+
+def test_read_events_refuses_a_link(tmp_path: Path) -> None:
+    target = tmp_path / "other.jsonl"
+    target.write_text('{"ts": 1, "kind": "error", "message": "elsewhere"}\n')
+    link = tmp_path / events.EVENTS_NAME
+    link.symlink_to(target)
+    assert list(events.read_events(link)) == []
+    assert list(events.read_events(target))  # the same file, read directly

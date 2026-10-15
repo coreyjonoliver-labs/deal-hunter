@@ -406,3 +406,34 @@ def test_old_settings_name_still_loads(
     (tmp_path / "nuc-hunter.toml").write_text(SETTINGS)
     assert main(["render", "-o", str(tmp_path / "c.toml")]) == 0
     assert "rename it to deal-hunter.toml" in capsys.readouterr().err
+
+
+def test_unattended_run_deletes_a_planted_aimm_config(
+    tmp_path: Path, aimm_calls: list[tuple[list[str], object]]
+) -> None:
+    from fakes import LOGIN_COOKIE, FakeContext
+
+    from deal_hunter import session
+    from deal_hunter.session import save
+
+    planted = session.AIMM_HOME / "config.toml"
+    planted.symlink_to(tmp_path / "elsewhere.toml")  # dangling counts too
+    fb = tmp_path / "fb.json"
+    save(FakeContext([LOGIN_COOKIE]), fb)
+    s = write_settings(tmp_path / "s.toml", f'session_file = "{fb}"\nrequire_session = true\n')
+    assert main(["-s", str(s), "run", "-o", str(tmp_path / "c.toml")]) == 0
+    assert not os.path.lexists(planted) and aimm_calls
+
+
+def test_attended_run_only_warns_about_aimm_config(
+    settings: Path,
+    aimm_calls: list[tuple[list[str], object]],
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    from deal_hunter import session
+
+    mine = session.AIMM_HOME / "config.toml"
+    mine.write_text("# the user's own\n")
+    main(["-s", str(settings), "run", "-o", str(tmp_path / "c.toml")])
+    assert mine.exists() and "will be merged" in capsys.readouterr().err
