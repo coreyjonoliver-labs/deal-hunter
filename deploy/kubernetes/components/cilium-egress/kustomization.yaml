@@ -1,0 +1,18 @@
+# Cilium only: replaces the base policy's "any public HTTPS" egress with a
+# DNS-aware allowlist (Facebook and the Anthropic API), and keeps the node
+# and the outside world off the dashboard port. Add your notifier's host
+# (ntfy.sh, api.pushover.net, ...) or another AI provider to BOTH lists in
+# cnp.yaml.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - cnp.yaml
+patches:
+  # Cilium unions allows, so the base policy's broad 443 rule must go.
+  - target:
+      kind: NetworkPolicy
+      name: deal-hunter
+    patch: |-
+      - op: replace
+        path: /spec/egress
+        value: []

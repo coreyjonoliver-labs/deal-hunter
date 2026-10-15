@@ -1,0 +1,15 @@
+# Runs the pod in a microVM, so a browser exploit lands in a throwaway guest
+# kernel instead of the node's. Needs a RuntimeClass named kata (Kata
+# Containers installed on the nodes); for gVisor, change the name to your
+# RuntimeClass (often gvisor or runsc). If only some nodes have the runtime,
+# give the RuntimeClass a scheduling.nodeSelector.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+patches:
+  - target:
+      kind: Deployment
+      name: deal-hunter
+    patch: |-
+      - op: add
+        path: /spec/template/spec/runtimeClassName
+        value: kata

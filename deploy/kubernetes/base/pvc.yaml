@@ -1,0 +1,13 @@
+# aimm's cache (listings, ratings, notifications), its log, deal-hunter's
+# events file, and the saved Facebook session (its own subdirectory, which
+# only the monitor mounts). Keep it: losing the cache means the AI rates
+# every listing again.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: deal-hunter-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 2Gi

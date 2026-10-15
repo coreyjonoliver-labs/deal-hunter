@@ -1,0 +1,66 @@
+# The hosts a headless Marketplace search and a listing page load, from the
+# browser's request log (a logged-in page adds facebook.com subdomains):
+#   www.facebook.com, facebook.com, *.facebook.com  pages and their GraphQL API
+#   *.xx.fbcdn.net      static.xx / scontent.xx: scripts, CSS, images
+#   *.*.fna.fbcdn.net   the nearest CDN site's images (the site label varies)
+#   api.anthropic.com   the AI rating ([ai] provider = "anthropic")
+# Cilium's `*` matches within one label, never across a dot.
+#
+# What's left: a compromised browser can still post to Facebook (it holds a
+# logged-in session) and to the AI provider's API with an attacker's own
+# key. A spending limit on your key bounds cost, not exfiltration.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: deal-hunter-internet-egress
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: deal-hunter
+  egress:
+    # Required, not redundant: toFQDNs learns name->IP mappings from the
+    # queries this L7 DNS rule lets Cilium's proxy see.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: ANY}
+          rules:
+            dns:
+              # Exactly the toFQDNs list below.
+              - matchName: www.facebook.com
+              - matchName: facebook.com
+              - matchPattern: "*.facebook.com"
+              - matchPattern: "*.xx.fbcdn.net"
+              - matchPattern: "*.*.fna.fbcdn.net"
+              - matchName: api.anthropic.com
+    - toFQDNs:
+        - matchName: www.facebook.com
+        - matchName: facebook.com
+        - matchPattern: "*.facebook.com"
+        - matchPattern: "*.xx.fbcdn.net"
+        - matchPattern: "*.*.fna.fbcdn.net"
+        - matchName: api.anthropic.com
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+---
+# The dashboard has no login. A NetworkPolicy can't exclude Cilium's host
+# identity, so without this a hostNetwork pod could reach 8740 directly and
+# skip your proxy. ingressDeny wins over every allow (which is why the
+# probes are exec, not httpGet).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: deal-hunter-host-deny
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: deal-hunter
+  ingressDeny:
+    - fromEntities: [host, remote-node, kube-apiserver, world, unmanaged]
+      toPorts:
+        - ports:
+            - {port: "8740", protocol: TCP}

@@ -1,0 +1,32 @@
+# Settings for an unattended pod. See src/deal_hunter/example-settings.toml
+# and the README for every option.
+[location]
+search_city = "CHANGE_ME"
+radius = 25
+
+[search]
+interval = "1h"
+max_interval = "2h"
+
+[[watch]]
+name = "mini PC"
+preset = "mini-pc"
+min_price = 40
+max_price = 400
+preferences = "Mini PC for a home server, 16GB+ RAM, power adapter included."
+
+[ai]
+provider = "anthropic"      # api.anthropic.com is in the cilium-egress allowlist
+rating = 3
+
+[notify]
+methods = []                # add a notifier's host to the egress allowlist too
+
+[facebook]
+# On the volume's session/ subdirectory, which only the monitor mounts.
+session_file = "/session/facebook-session.json"
+# No one can log in inside the pod: never wait for a login window.
+require_session = true
+# Chromium's sandbox can't start under RuntimeDefault seccomp with no
+# capabilities; the microVM and the egress allowlist are the boundary.
+browser_sandbox = false

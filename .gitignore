@@ -14,3 +14,5 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+# the example overlay's settings hold no secrets or location
+!deploy/kubernetes/example/deal-hunter.toml
