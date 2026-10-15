@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "project": {
+    "name": "deal-hunter",
+    "tagline": "Watch Facebook Marketplace for what you want, rated by AI.",
+    "type": "CLI + service",
+    "primaryLanguage": "Python"
+  },
+  "commands": {
+    "test": "uv run pytest -q",
+    "lint": "uv run ruff check .",
+    "format": "uv run ruff format --check .",
+    "typecheck": "uv run mypy",
+    "build": "docker build -t deal-hunter:dev ."
+  },
+  "protectedBranch": "main",
+  "profile": "established"
+}

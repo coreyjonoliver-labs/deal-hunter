@@ -1,0 +1,104 @@
+{
+  "_comment": "Machine-managed by spec-workflow-init. Do not edit by hand — hand-editing breaks --refresh hash matching. See plugin/bin/spec-workflow-init.",
+  "pluginVersion": "1.14.0",
+  "answers": {
+    "version": 1,
+    "project": {
+      "name": "deal-hunter",
+      "tagline": "Watch Facebook Marketplace for what you want, rated by AI.",
+      "type": "CLI + service",
+      "primaryLanguage": "Python"
+    },
+    "commands": {
+      "test": "uv run pytest -q",
+      "lint": "uv run ruff check .",
+      "format": "uv run ruff format --check .",
+      "typecheck": "uv run mypy",
+      "build": "docker build -t deal-hunter:dev ."
+    },
+    "protectedBranch": "main",
+    "profile": "established"
+  },
+  "managedFiles": [
+    {
+      "path": ".claude/lessons/README.md",
+      "hash": "22d107f72b202e7bce544fc58adfb1b16a65f3fc53c33d0f4d65a03939c9786a"
+    },
+    {
+      "path": ".claude/loop.md",
+      "hash": "7b2063f6faef878fed5c7104db9e90700e09a6e459c00644e297b85b6cd0fa8e"
+    },
+    {
+      "path": ".claude/settings.json",
+      "hash": "542d57331ee80a04018cd7d9abdd2a5ac9d50ae3945c217931cb0e37b8e27601"
+    },
+    {
+      "path": ".claude/skills/deal-hunter-conventions/SKILL.md",
+      "hash": "7ed4b4c70a43825508fd871ca8b13b2b7a03849a68596b51cf6a24900ef879cd"
+    },
+    {
+      "path": ".claude/spec-workflow.example.json",
+      "hash": "2c0e2c24076ea567f33f2fa14a47e8bbca925e31bc1a3ad4b041a92d09780155"
+    },
+    {
+      "path": ".gitignore",
+      "hash": "5335ac36469e94b58c29cb022bcec95ae0dc1f1a03c00dffee20cec008783838"
+    },
+    {
+      "path": "BACKLOG.md",
+      "hash": "d223fd3168b8f3de845f1d5a1ceeae63f39b22109b7f927dc2858c2f4953cce7"
+    },
+    {
+      "path": "CLAUDE.md",
+      "hash": "5ee826e716f471e271bf95af139499c7fe5450e7fdbd77877d4dd5d764d7cc71"
+    },
+    {
+      "path": "docs/llm-workflow-guide.md",
+      "hash": "80eac31357e6ba0618053380cae724514587e1379cebb22a88e3b3eb0343e3d0"
+    },
+    {
+      "path": "docs/loops.md",
+      "hash": "423263ae46e9ffab1abc089bcb40d13c94da3a3a2478448b42976d464d4c806b"
+    },
+    {
+      "path": "docs/parallel-work.md",
+      "hash": "25adbb9be10ea1b7d64fa4fafc70f2c7a765390740084837fb0acd814ce279e6"
+    },
+    {
+      "path": "docs/profiles.md",
+      "hash": "50fd33a01217683a2c75df8ef952c7f78ed346c40efb9e391949f03e48ee24f8"
+    },
+    {
+      "path": "docs/roadmap.md",
+      "hash": "7f52c0cecd77935aad513a3a2a9c1bb422d9cc3dbf6c1add005632395f2d54e1"
+    },
+    {
+      "path": "docs/sandboxing.md",
+      "hash": "5bcb2ff9be47b8ae340d30e6ca6253e8f14d1ab20164f7b5750d034ab16a3b5d"
+    },
+    {
+      "path": "docs/spec-lifecycle.md",
+      "hash": "fa1e761fd6a86dae3c89a556ae53186bbc80bfa7ddab530d12fbe232a9c17045"
+    },
+    {
+      "path": "docs/specs/_template.md",
+      "hash": "12da9edf425f97252903076bebaae6e1cbe25cd7501b6ed01e279815d2d3a58c"
+    },
+    {
+      "path": "docs/updating.md",
+      "hash": "83bae24400d04b32206c8d09d983ca7a484435a42538b488b83d45112f80fbe4"
+    },
+    {
+      "path": "docs/using-the-workflow.md",
+      "hash": "c2d1ba93eb14c71103623b9a2d63e1f5e4eb6c93f1203fa3eb3b5afb445a57d7"
+    },
+    {
+      "path": "PROGRESS.md",
+      "hash": "3e694159f34ede68c1cae5d92caf46f31d0ef0d501dbb20b511b9d5ff21c0a07"
+    },
+    {
+      "path": "README.md",
+      "hash": "b4610ce4de15c8b8e0e2ab53056b80b517d794eef7a5a3b1fc65c5b379ef79aa"
+    }
+  ]
+}

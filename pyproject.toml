@@ -43,4 +43,6 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The Claude Code sandbox denies even stat() on .env, which pytest's root scan trips on.
+addopts = ["--ignore=.env"]
 filterwarnings = ["ignore::DeprecationWarning:ai_marketplace_monitor.*", "ignore::DeprecationWarning:pyparsing.*", "ignore:.*deprecated.*:DeprecationWarning"]

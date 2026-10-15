@@ -1,0 +1,23 @@
+{
+  "$schema": "https://raw.githubusercontent.com/coreyjonoliver-labs/claude-spec-workflow/main/plugin/schema/spec-workflow.schema.json",
+  "version": 1,
+  "project": {
+    "name": "acme-api",
+    "tagline": "Billing and entitlements service for Acme.",
+    "type": "service",
+    "primaryLanguage": "typescript"
+  },
+  "commands": {
+    "test": "npm test",
+    "lint": "npm run lint",
+    "format": "npm run format",
+    "typecheck": "npm run typecheck",
+    "build": "npm run build"
+  },
+  "coverageThreshold": 80,
+  "protectedBranch": "main|master|release",
+  "profile": "established",
+  "codeqlLanguages": ["javascript"],
+  "gate": { "preset": "full" },
+  "loop": { "maxItemsPerRun": 5 }
+}

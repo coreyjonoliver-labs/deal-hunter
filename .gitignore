@@ -16,3 +16,14 @@ __pycache__/
 .mypy_cache/
 # the example overlay's settings hold no secrets or location
 !deploy/kubernetes/example/deal-hunter.toml
+
+# spec-workflow plugin docs: the plugin is private, so they stay out of this
+# public repo (spec-workflow-init copies them on adopt/refresh)
+/docs/llm-workflow-guide.md
+/docs/loops.md
+/docs/parallel-work.md
+/docs/profiles.md
+/docs/sandboxing.md
+/docs/spec-lifecycle.md
+/docs/updating.md
+/docs/using-the-workflow.md
