@@ -45,7 +45,9 @@ spec:
             # IPs in your overlay: hairpinned requests to them can arrive
             # with an internal source address and pass "internal only"
             # allowlists. IPv6 egress isn't allowed at all; if you add
-            # ::/0, except fc00::/7, fe80::/10 and ::1/128.
+            # ::/0, except fc00::/7, fe80::/10, ::1/128, ::ffff:0:0/96
+            # (IPv4-mapped) and 64:ff9b::/96, 64:ff9b:1::/48 (NAT64, which
+            # reaches the IPv4 ranges above).
             except:
               - 0.0.0.0/8
               - 10.0.0.0/8

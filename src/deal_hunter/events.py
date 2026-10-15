@@ -107,8 +107,11 @@ class EventRecorder(logging.Handler):
     def _trim(self) -> None:
         from deal_hunter.files import write_private
 
-        fd = os.open(self.path, os.O_RDONLY | os.O_NOFOLLOW)  # not a link swapped in
+        # Not a link or FIFO swapped in since write() opened it.
+        fd = os.open(self.path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         with os.fdopen(fd, encoding="utf-8") as f:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                return
             lines = f.read().splitlines(keepends=True)
         write_private(self.path, "".join(lines[len(lines) // 2 :]))
 
@@ -176,7 +179,7 @@ def read_events(path: Path, max_bytes: int = READ_BYTES) -> Iterator[dict[str, A
     try:
         # Never a link: the monitor's side could point one anywhere web can read.
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-    except (FileNotFoundError, OSError):
+    except OSError:  # missing, or a link
         return
     f = os.fdopen(fd, "rb")
     with f:

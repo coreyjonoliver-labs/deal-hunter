@@ -199,3 +199,16 @@ def test_secret_destinations(base_settings: dict[str, Any]) -> None:
         "AI key -> llm.example.net",
         "SMTP password -> smtp.example.org",
     ]
+
+
+def test_smtp_destination_follows_aimm_sender(base_settings: dict[str, Any]) -> None:
+    from deal_hunter.render import secret_destinations
+
+    base_settings["notify"] = {
+        "methods": ["email"],
+        "email": "me@example.org",
+        "smtp_username": "relay@mail.example.net",
+    }
+    assert secret_destinations(parse_settings(base_settings))[-1] == (
+        "SMTP password -> smtp.mail.example.net"
+    )
