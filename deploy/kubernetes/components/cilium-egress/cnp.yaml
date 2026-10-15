@@ -4,11 +4,19 @@
 #   *.xx.fbcdn.net      static.xx / scontent.xx: scripts, CSS, images
 #   *.*.fna.fbcdn.net   the nearest CDN site's images (the site label varies)
 #   api.anthropic.com   the AI rating ([ai] provider = "anthropic")
+#   discord.com         optional: Discord alerts (notify.methods = ["discord"])
 # Cilium's `*` matches within one label, never across a dot.
 #
 # toFQDNs allows the IPs a name resolves to, not the name itself: a host on
 # a shared CDN edge (some notifiers) admits every site on those IPs. For
 # such hosts, prefer an egress proxy that checks the TLS server name.
+#
+# Enabling the optional discord.com entry (Discord alerts) adds to what's
+# left: the policy is pod-wide, so a compromised browser gets a channel to any
+# Discord webhook or bot (exfiltration, commands), and discord.com is
+# Cloudflare-fronted, so allowing its IPs admits other Cloudflare sites too.
+# With Discord enabled, prefer an SNI-checking egress proxy; if the browser
+# may have been compromised, delete and recreate the webhook.
 #
 # What's left: a compromised browser can still post to Facebook (it holds a
 # logged-in session) and to the AI provider's API with an attacker's own
@@ -40,6 +48,8 @@ spec:
               - matchPattern: "*.xx.fbcdn.net"
               - matchPattern: "*.*.fna.fbcdn.net"
               - matchName: api.anthropic.com
+              # Optional: only with notify.methods = ["discord"].
+              # - matchName: discord.com
     - toFQDNs:
         - matchName: www.facebook.com
         - matchName: facebook.com
@@ -47,6 +57,8 @@ spec:
         - matchPattern: "*.xx.fbcdn.net"
         - matchPattern: "*.*.fna.fbcdn.net"
         - matchName: api.anthropic.com
+        # Optional: only with notify.methods = ["discord"].
+        # - matchName: discord.com
       toPorts:
         - ports:
             - {port: "443", protocol: TCP}

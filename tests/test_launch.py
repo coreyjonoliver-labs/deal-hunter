@@ -17,11 +17,15 @@ from typing import Any
 
 import pytest
 from ai_marketplace_monitor import ai, facebook, marketplace, monitor, utils
+from ai_marketplace_monitor.notification import NotificationConfig, NotificationStatus
+from ai_marketplace_monitor.user import User, UserConfig
 from fakes import LOGIN_COOKIE, FakeBrowser, FakeContext
 
 from deal_hunter import events, launch, profile
 from deal_hunter import session as fb_session
 from deal_hunter.session import Session, SessionError
+
+FAKE_WEBHOOK = "https://discord.com/api/webhooks/1234567890/FAKE-token_0123456789abcdef"
 
 # What a mini-pc watch drops on.
 ANTIKEYWORDS = profile.MINI_PC_ANTIKEYWORDS
@@ -125,10 +129,12 @@ def test_main_patches_then_runs_aimm(
         (ai.AIResponse, "to_cache"),
         (monitor.MarketplaceMonitor, "_launch_browser"),
         (monitor.MarketplaceMonitor, "__init__"),
+        (NotificationConfig, "notify_all"),
     ]:
         monkeypatch.setattr(cls, name, getattr(cls, name))
     monkeypatch.setattr(launch, "SESSION", None)
     monkeypatch.setattr(launch, "SANDBOX", True)
+    monkeypatch.setattr(launch, "DISCORD", None)
     old_umask = os.umask(0o022)
     request_finalizer.append(lambda: os.umask(old_umask))
 
@@ -140,7 +146,7 @@ def test_main_patches_then_runs_aimm(
     sess = Session(tmp_path / "s.json", required=True)
     config = tmp_path / "c.toml"
     config.write_text('[marketplace.facebook]\nsearch_city = "springfieldtest"\n')
-    launch.main(["--config", str(config)], sess, sandbox=False)
+    launch.main(["--config", str(config)], sess, sandbox=False, discord_url=FAKE_WEBHOOK)
     assert calls == [{"args": ["--config", str(config)], "prog_name": "ai-marketplace-monitor"}]
     assert seen == [launch.is_substring_without_urls]
     assert marketplace.Marketplace.goto_url is launch.goto_url_with_timeout
@@ -152,6 +158,9 @@ def test_main_patches_then_runs_aimm(
     assert isinstance(ai.re, launch.StrictRatingRe)
     assert monitor.MarketplaceMonitor._launch_browser is launch.launch_browser
     assert monitor.MarketplaceMonitor.__init__ is launch.monitor_init
+    patched = NotificationConfig.__dict__["notify_all"]
+    assert isinstance(patched, classmethod) and patched.__func__ is launch.notify_all_with_discord
+    assert launch.DISCORD is not None and launch.DISCORD.timeout == 10
     assert launch.SESSION == sess and launch.SANDBOX is False
     assert os.umask(0o022) == 0o077  # files aimm writes are owner-only
     monitor_logger = logging.getLogger("monitor")
@@ -1253,3 +1262,224 @@ def test_unmatched_rating_line_warns_once_without_text(
     assert len(msgs) == 1
     assert "rating line didn't match the expected format" in msgs[0]
     assert "secret-seller-text" not in msgs[0] and "5" not in msgs[0]
+
+
+# --- Discord via notify_all ---------------------------------------------------------
+
+
+def test_notify_all_patch_points_still_exist() -> None:
+    # Discord is posted from a wrapper around this classmethod; see launch.py, 9.
+    raw = NotificationConfig.__dict__["notify_all"]
+    assert isinstance(raw, classmethod)
+    assert launch._upstream_notify_all.__qualname__ == "NotificationConfig.notify_all"
+    assert list(inspect.signature(launch._upstream_notify_all).parameters) == [
+        "cls",
+        "config",
+        "args",
+        "kwargs",
+    ]
+    source = inspect.getsource(launch._upstream_notify_all)
+    # The recursion that makes "only when cls is NotificationConfig" necessary,
+    # and the arguments the wrapper forwards.
+    assert "for subclass in cls.__subclasses__():" in source
+    assert "subclass.notify_all(config, *args, **kwargs)" in source
+    assert "subclass_obj.notify(*args, **kwargs)" in source
+    assert "return any(succ)" in source
+    caller = inspect.getsource(User.notify)
+    assert "NotificationConfig.notify_all(" in caller
+    assert "self.config, listings, ratings, statuses, force=force, logger=self.logger" in caller
+    assert "if force or ns != NotificationStatus.NOTIFIED:" in caller
+    assert "self.to_cache(listing, local_cache=local_cache)" in caller
+    assert [s.name for s in NotificationStatus] == [
+        "NOT_NOTIFIED",
+        "EXPIRED",
+        "NOTIFIED",
+        "LISTING_CHANGED",
+        "LISTING_DISCOUNTED",
+    ]
+    assert len(NotificationConfig.__subclasses__()) > 1  # the recursion has something to walk
+
+
+class Posts:
+    """A webhook that records what it is sent and answers with a fixed status."""
+
+    def __init__(self, status: int = 204) -> None:
+        self.status = status
+        self.bodies: list[dict[str, Any]] = []
+
+    def transport(self, url: str, body: bytes, timeout: float) -> Any:
+        from deal_hunter.discord import Reply
+
+        self.bodies.append(json.loads(body))
+        return Reply(self.status)
+
+    @property
+    def embeds(self) -> int:
+        return sum(len(b["embeds"]) for b in self.bodies)
+
+
+@pytest.fixture
+def discord_patched(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[Posts, list[Any]]]:
+    """aimm's notify_all patched as main() does, Discord pointed at a recorder.
+
+    Also records the cls of every wrapper call, so tests can see the recursion.
+    """
+    from deal_hunter.discord import DiscordWebhook
+
+    posts = Posts()
+    calls: list[Any] = []
+
+    def spying(cls: Any, *args: Any, **kwargs: Any) -> bool:
+        calls.append(cls)
+        return launch.notify_all_with_discord(cls, *args, **kwargs)
+
+    monkeypatch.setattr(NotificationConfig, "notify_all", classmethod(spying))
+    monkeypatch.setattr(
+        launch,
+        "DISCORD",
+        DiscordWebhook(FAKE_WEBHOOK, transport=posts.transport, sleep=lambda s: None),
+    )
+    yield posts, calls
+
+
+def rated(n: int) -> list[Any]:
+    return [ai.AIResponse(score=4, comment="Fair ~$350 vs $220 ask; buy", name="desk")] * n
+
+
+def test_one_notify_all_call_posts_once_despite_the_recursion(
+    discord_patched: tuple[Posts, list[Any]],
+) -> None:
+    posts, calls = discord_patched
+    listings = [_listing(n) for n in (1, 2, 3)]
+    statuses = [NotificationStatus.NOT_NOTIFIED] * 3
+    result = NotificationConfig.notify_all(
+        UserConfig(name="me"), listings, rated(3), statuses, force=False, logger=None
+    )
+    assert result is True  # Discord was the only method that sent
+    assert len(calls) > 1 and calls[0] is NotificationConfig  # aimm recursed into subclasses
+    assert any(c is not NotificationConfig for c in calls)
+    assert len(posts.bodies) == 1 and posts.embeds == 3
+
+
+def test_a_nested_call_on_a_subclass_never_posts(
+    discord_patched: tuple[Posts, list[Any]],
+) -> None:
+    posts, _ = discord_patched
+    result = UserConfig.notify_all(
+        UserConfig(name="me"), [_listing()], rated(1), [NotificationStatus.NOT_NOTIFIED]
+    )
+    assert result is False and posts.bodies == []
+
+
+@pytest.mark.parametrize(
+    ("upstream", "discord_ok", "expected"),
+    [(False, False, False), (True, False, True), (False, True, True), (True, True, True)],
+)
+def test_result_is_upstream_or_discord(
+    monkeypatch: pytest.MonkeyPatch,
+    discord_patched: tuple[Posts, list[Any]],
+    upstream: bool,
+    discord_ok: bool,
+    expected: bool,
+) -> None:
+    posts, _ = discord_patched
+    posts.status = 204 if discord_ok else 404
+    monkeypatch.setattr(launch, "_upstream_notify_all", lambda cls, *a, **k: upstream)
+    result = NotificationConfig.notify_all(
+        UserConfig(name="me"), [_listing()], rated(1), [NotificationStatus.NOT_NOTIFIED]
+    )
+    assert result is expected
+    assert len(posts.bodies) == 1  # Discord is tried whatever the others did
+
+
+def test_without_discord_it_is_aimms_own_result(
+    monkeypatch: pytest.MonkeyPatch, discord_patched: tuple[Posts, list[Any]]
+) -> None:
+    posts, _ = discord_patched
+    monkeypatch.setattr(launch, "DISCORD", None)
+    monkeypatch.setattr(launch, "_upstream_notify_all", lambda cls, *a, **k: True)
+    assert NotificationConfig.notify_all(UserConfig(name="me"), [_listing()], rated(1), [0]) is True
+    assert posts.bodies == []
+
+
+def test_a_card_bug_is_logged_and_never_raised(
+    monkeypatch: pytest.MonkeyPatch,
+    discord_patched: tuple[Posts, list[Any]],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def boom(*args: Any, **kwargs: Any) -> bool:
+        raise RuntimeError(f"bad card for {FAKE_WEBHOOK}")
+
+    monkeypatch.setattr(launch.discord, "notify", boom)
+    monkeypatch.setattr(launch, "_upstream_notify_all", lambda cls, *a, **k: True)
+    with caplog.at_level(logging.ERROR, logger="monitor"):
+        result = NotificationConfig.notify_all(UserConfig(name="me"), [_listing()], rated(1), [0])
+    assert result is True
+    assert "RuntimeError" in caplog.text and "FAKE-token" not in caplog.text
+
+
+def notify_as_aimm(cache: Any, listings: list[Any], force: bool = False, name: str = "desk") -> Any:
+    user = User(UserConfig(name="me"), None)
+    item = SimpleNamespace(name=name)
+    user.notify(listings, rated(len(listings)), item, local_cache=cache, force=force)
+    return user
+
+
+def test_aimm_marks_discord_listings_notified_so_the_next_cycle_sends_nothing(
+    aimm_cache: Any, discord_patched: tuple[Posts, list[Any]]
+) -> None:
+    posts, _ = discord_patched
+    listings = [_listing(1), _listing(2)]
+    user = notify_as_aimm(aimm_cache, listings)
+    assert len(posts.bodies) == 1 and posts.embeds == 2
+    assert all(
+        user.notification_status(item, aimm_cache) is NotificationStatus.NOTIFIED
+        for item in listings
+    )
+    notify_as_aimm(aimm_cache, listings)  # the next cycle
+    assert posts.embeds == 2  # nothing more
+    notify_as_aimm(aimm_cache, listings + [_listing(3)])  # only the new one
+    assert posts.embeds == 3
+    notify_as_aimm(aimm_cache, listings, force=True)
+    assert posts.embeds == 5
+
+
+def test_a_failing_webhook_leaves_listings_unnotified_for_the_next_cycle(
+    aimm_cache: Any, discord_patched: tuple[Posts, list[Any]]
+) -> None:
+    posts, _ = discord_patched
+    posts.status = 404
+    user = notify_as_aimm(aimm_cache, [_listing(1)])
+    assert user.notification_status(_listing(1), aimm_cache) is NotificationStatus.NOT_NOTIFIED
+    posts.status = 204
+    notify_as_aimm(aimm_cache, [_listing(1)])
+    assert posts.embeds == 2  # one failed post, then one that landed
+    assert user.notification_status(_listing(1), aimm_cache) is NotificationStatus.NOTIFIED
+
+
+def test_price_drop_posts_again_labelled(
+    aimm_cache: Any, discord_patched: tuple[Posts, list[Any]]
+) -> None:
+    import dataclasses
+
+    posts, _ = discord_patched
+    notify_as_aimm(aimm_cache, [_listing(1)])
+    cheaper = dataclasses.replace(_listing(1), price="$150")
+    notify_as_aimm(aimm_cache, [cheaper])
+    assert [e["footer"]["text"] for b in posts.bodies for e in b["embeds"]] == [
+        "New listing",
+        "Price drop",
+    ]
+
+
+def test_a_webhook_that_rejects_every_card_leaves_listings_unnotified(
+    aimm_cache: Any, discord_patched: tuple[Posts, list[Any]]
+) -> None:
+    posts, _ = discord_patched
+    posts.status = 400
+    listings = [_listing(1), _listing(2)]
+    user = notify_as_aimm(aimm_cache, listings)
+    assert all(
+        user.notification_status(item, aimm_cache) is NotificationStatus.NOT_NOTIFIED
+        for item in listings
+    )

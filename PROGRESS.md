@@ -4,6 +4,30 @@ A running, dated log of completed work. Append a new entry (newest at the top)
 each time a spec reaches `Complete` or a meaningful milestone lands. This is the
 project's memory between sessions — `session-start` surfaces the latest entry.
 
+## 2026-10-15 — discord-deal-alerts
+
+- `notify.methods = ["discord"]` posts each matching listing to a Discord
+  webhook (`DISCORD_WEBHOOK_URL`, env only; validated, host rewritten to
+  discord.com, redacted everywhere) as a card: photo (fbcdn only), title
+  linked to the item page, price, rating, condition, town, watch, reason
+  (new / price drop / updated / reminder), cleaned and escaped AI summary.
+  `deal-hunter notify-test` sends a sample card.
+- Hooked into aimm's `NotificationConfig.notify_all` (top-level call only),
+  so aimm still records listings as notified: one card per listing, no
+  repeats. Seller/AI text: Cc/Cf stripped, whitespace collapsed, markdown
+  escaped, every `://` defanged, `@` neutralised, `allowed_mentions` none.
+  Sender: urllib, redirects refused, 10 s timeout, 429/5xx retries, 90 s
+  budget; a rejected card is split out and dropped without blocking others,
+  but a send counts as delivered only if Discord accepted a card.
+- Gate: 3 rounds, code-reviewer + security-auditor, 0 CRITICAL/HIGH; checks
+  enforced (747 tests, ruff, mypy, kustomize). Found and fixed: a one-
+  character prefix (`xhttps://`) bypassed the link defang; newlines/bidi in
+  summaries; rejection counted as delivery; discord.com egress docs now name
+  it as an exfiltration channel. Not yet verified live: run `notify-test`
+  against a real channel to confirm Discord renders the escaping as
+  intended.
+- Current Focus cleared; promoted `bump-aimm` from Up Next.
+
 ## 2026-10-15 — rating-summary-format
 
 - Both rating prompts require a plain-text final line

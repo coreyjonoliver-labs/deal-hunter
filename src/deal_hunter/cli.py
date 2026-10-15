@@ -1,15 +1,18 @@
-"""deal-hunter command line: init, render, check, login, run, web."""
+"""deal-hunter command line: init, render, check, login, run, web, notify-test."""
 
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import signal
 import sys
 import time
 from importlib import resources
 from pathlib import Path
+from urllib.parse import urlparse
 
+from deal_hunter.discord import DiscordWebhook, sample_message, validate_webhook_url
 from deal_hunter.files import write_private
 from deal_hunter.render import build_config, render, required_env, secret_destinations
 from deal_hunter.session import (
@@ -22,7 +25,7 @@ from deal_hunter.session import (
     interactive_login,
 )
 from deal_hunter.session import load as load_session
-from deal_hunter.settings import Settings, SettingsError, load_settings
+from deal_hunter.settings import DISCORD_WEBHOOK_ENV, Settings, SettingsError, load_settings
 
 DEFAULT_SETTINGS = Path("deal-hunter.toml")
 # The settings file's name before the project was renamed.
@@ -49,6 +52,11 @@ def main(argv: list[str] | None = None) -> int:
     p_check.add_argument("title")
     p_check.add_argument("description", nargs="?", default="")
     p_check.add_argument("--price", type=int, default=None)
+
+    sub.add_parser(
+        "notify-test",
+        help="send a sample card through each enabled deal-hunter notifier (Discord)",
+    )
 
     sub.add_parser("login", help="log in to Facebook once and save the session for `run`")
 
@@ -116,6 +124,8 @@ def main(argv: list[str] | None = None) -> int:
             return _check(args.settings, args.title, args.description, args.price)
         if args.command == "login":
             return _login(args.settings)
+        if args.command == "notify-test":
+            return _notify_test(args.settings)
         if args.command == "web":
             return _web(args.settings, args.host, args.port, args.allow_host)
         return _run(
@@ -189,6 +199,37 @@ def _login(settings_path: Path) -> int:
     return 0
 
 
+def _discord_url(settings: Settings) -> str | None:
+    """The validated webhook URL if the discord method is on. Errors never include it."""
+    if "discord" not in settings.notify.methods:
+        return None
+    return validate_webhook_url(os.environ.get(DISCORD_WEBHOOK_ENV, ""))
+
+
+def _notify_test(settings_path: Path) -> int:
+    settings = load_settings(settings_path)
+    url = _discord_url(settings)
+    if url is None:
+        print(
+            "deal-hunter: no notification method of deal-hunter's own is enabled; "
+            'add "discord" to notify.methods.',
+            file=sys.stderr,
+        )
+        return 1
+    webhook = DiscordWebhook(url, logger=_QUIET)
+    if webhook.send([sample_message()]):
+        print("Sent a test card to Discord.")
+        return 0
+    print(f"deal-hunter: Discord: {webhook.last_error}", file=sys.stderr)
+    return 1
+
+
+# The sender logs through aimm's logger during `run`; here the reason is printed once.
+_QUIET = logging.getLogger("deal_hunter.notify_test")
+_QUIET.addHandler(logging.NullHandler())
+_QUIET.propagate = False
+
+
 def _web(settings_path: Path, host: str, port: int, allow_hosts: list[str]) -> int:
     from deal_hunter.dashboard import LOOPBACK, serve
     from deal_hunter.session import AIMM_HOME
@@ -237,6 +278,7 @@ def _run(
             f"missing environment variable(s): {', '.join(missing)}. "
             "Export them (see README) or change [ai]/[notify] in your settings."
         )
+    discord_url = _discord_url(settings)  # stops here, before a browser starts, if it's wrong
     if (seed is not None or wait_s) and not settings.require_session:
         raise SettingsError(
             "--session-seed and --wait-for-session need facebook.require_session = true."
@@ -254,7 +296,9 @@ def _run(
         if copied:
             print(f"Copied a new session from {seed} to {settings.session_file}.", flush=True)
         if not (awaiting and not copied):
-            return _start(settings_path, settings, output, aimm_args, webui=webui)
+            return _start(
+                settings_path, settings, output, aimm_args, webui=webui, discord_url=discord_url
+            )
         # The session failed and the seed hasn't changed: don't load Facebook
         # again with dead cookies, just keep waiting for a new seed.
         print(f"deal-hunter: still waiting for a new session in {seed}.", file=sys.stderr)
@@ -325,7 +369,13 @@ def _minutes(seconds: int) -> str:
 
 
 def _start(
-    settings_path: Path, settings: Settings, output: Path, aimm_args: list[str], *, webui: bool
+    settings_path: Path,
+    settings: Settings,
+    output: Path,
+    aimm_args: list[str],
+    *,
+    webui: bool,
+    discord_url: str | None = None,
 ) -> int:
     session = (
         None if settings.anonymous else Session(settings.session_file, settings.require_session)
@@ -367,12 +417,15 @@ def _start(
     if settings.anonymous or settings.require_session:  # no one is there to log in
         argv.append("--headless")
     argv += aimm_args
-    if destinations := secret_destinations(settings):
+    destinations = secret_destinations(settings)
+    if discord_url:  # validated: https on one of Discord's hosts
+        destinations.append(f"Discord webhook -> {urlparse(discord_url).hostname}")
+    if destinations:
         print(f"Using {settings_path}: {', '.join(destinations)}", flush=True)
     print("Starting: ai-marketplace-monitor", " ".join(argv), flush=True)
     # In this process, not `python -m`: that would put the current directory
     # first on sys.path. launch.main applies deal-hunter's fixes to aimm.
     from deal_hunter.launch import main as run_aimm
 
-    run_aimm(argv, session, settings.browser_sandbox)
+    run_aimm(argv, session, settings.browser_sandbox, discord_url)
     return 0  # pragma: no cover — aimm exits via SystemExit

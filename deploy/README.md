@@ -106,15 +106,27 @@ So, in order of preference:
 
 Whatever the runtime, if you suspect the browser was compromised, delete the
 data volume (aimm reloads its cache on every start), revoke the Facebook
-session and rotate the API key. See the main README.
+session and rotate the API key. If you use Discord alerts, also delete and
+recreate the Discord webhook: its URL is a credential that lets anyone post
+to the channel. See the main README.
 
 ## Egress
 
 The monitor needs `www.facebook.com`, `facebook.com`, `*.facebook.com`,
 `*.xx.fbcdn.net` and `*.*.fna.fbcdn.net` on 443, plus your AI provider
 (`api.anthropic.com`, `api.openai.com`) and notifier (`ntfy.sh`,
-`api.pushover.net`, `api.telegram.org`, `api.pushbullet.com`, or your SMTP
-server). The dashboard makes no outbound calls.
+`api.pushover.net`, `api.telegram.org`, `api.pushbullet.com`, `discord.com`
+for `notify.methods = ["discord"]` (webhook in `DISCORD_WEBHOOK_URL`), or your
+SMTP server). The dashboard makes no outbound calls.
+
+`discord.com` is optional and widens the allowlist more than the others: the
+policy covers the whole pod, so a compromised browser that can reach
+`discord.com` has a place to send stolen data to (any Discord webhook) or take
+commands from (any bot), and `discord.com` sits behind Cloudflare, so an
+allowlist by resolved IP also admits other sites on the same edge. If you
+enable it, prefer an egress proxy that checks the TLS server name. Webhook
+URLs on `discordapp.com`, `ptb.discord.com` and `canary.discord.com` are
+accepted and sent to `discord.com`, which is the one host to allow.
 
 The base NetworkPolicy can only say "HTTPS to public addresses", so the
 browser can still reach any public site. Add the `cilium-egress` component

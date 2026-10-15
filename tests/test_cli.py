@@ -63,7 +63,8 @@ def test_run_disables_webui_by_default(
     monkeypatch.setenv("NTFY_TOPIC", "t")
     calls: list[list[str]] = []
     monkeypatch.setattr(
-        "deal_hunter.launch.main", lambda argv, session, sandbox: calls.append(argv)
+        "deal_hunter.launch.main",
+        lambda argv, session, sandbox, discord_url=None: calls.append(argv),
     )
     out = str(tmp_path / "c.toml")
     main(["-s", str(settings), "run", "-o", out])
@@ -127,7 +128,8 @@ def aimm_calls(monkeypatch: pytest.MonkeyPatch) -> list[tuple[list[str], object]
     monkeypatch.setenv("NTFY_TOPIC", "t")
     calls: list[tuple[list[str], object]] = []
     monkeypatch.setattr(
-        "deal_hunter.launch.main", lambda argv, session, sandbox: calls.append((argv, session))
+        "deal_hunter.launch.main",
+        lambda argv, session, sandbox, discord_url=None: calls.append((argv, session)),
     )
     return calls
 
@@ -465,3 +467,147 @@ def test_recorded_problems_hide_the_location(capsys: pytest.CaptureFixture[str])
     (event,) = read_events(session.AIMM_HOME / EVENTS_NAME)
     assert event["message"] == "Waiting near [location]"
     assert "springfieldtest" in capsys.readouterr().err  # the operator's own terminal
+
+
+# --- Discord ----------------------------------------------------------------------
+
+FAKE_TOKEN = "FAKE-token_0123456789abcdef"  # noqa: S105 — a fake, for redaction checks
+FAKE_URL = f"https://discord.com/api/webhooks/1234567890/{FAKE_TOKEN}"
+DISCORD_SETTINGS = SETTINGS.replace('["ntfy"]', '["discord"]')
+
+
+@pytest.fixture
+def discord_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    p = tmp_path / "deal-hunter.toml"
+    p.write_text(DISCORD_SETTINGS)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    monkeypatch.setenv("DISCORD_WEBHOOK_URL", FAKE_URL)
+    return p
+
+
+def test_run_hands_the_webhook_to_the_launcher(
+    discord_settings: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    seen: list[object] = []
+    monkeypatch.setattr(
+        "deal_hunter.launch.main",
+        lambda argv, session, sandbox, discord_url=None: seen.append(discord_url),
+    )
+    main(["-s", str(discord_settings), "run", "-o", str(tmp_path / "c.toml")])
+    assert seen == [FAKE_URL]
+    out = capsys.readouterr().out
+    assert "Discord webhook -> discord.com" in out and FAKE_TOKEN not in out
+    # Nothing Discord reaches the rendered aimm config.
+    assert "discord" not in (tmp_path / "c.toml").read_text().lower()
+
+
+def test_run_without_discord_passes_no_webhook(
+    settings: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    monkeypatch.setenv("NTFY_TOPIC", "t")
+    monkeypatch.setenv("DISCORD_WEBHOOK_URL", FAKE_URL)  # set but not enabled: ignored
+    seen: list[object] = []
+    monkeypatch.setattr(
+        "deal_hunter.launch.main",
+        lambda argv, session, sandbox, discord_url=None: seen.append(discord_url),
+    )
+    main(["-s", str(settings), "run", "-o", str(tmp_path / "c.toml")])
+    assert seen == [None]
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://example.com/api/webhooks/1/x",
+        f"http://discord.com/api/webhooks/1/{FAKE_TOKEN}",
+        "not a url",
+    ],
+)
+def test_run_rejects_a_bad_webhook_without_echoing_it(
+    discord_settings: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    url: str,
+) -> None:
+    monkeypatch.setenv("DISCORD_WEBHOOK_URL", url)
+    started: list[object] = []
+    monkeypatch.setattr("deal_hunter.launch.main", lambda *a, **k: started.append(a))
+    assert main(["-s", str(discord_settings), "run"]) == 2
+    err = capsys.readouterr().err
+    assert "DISCORD_WEBHOOK_URL" in err and url not in err and FAKE_TOKEN not in err
+    assert started == []
+
+
+def test_run_needs_the_webhook_env(
+    discord_settings: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv("DISCORD_WEBHOOK_URL")
+    assert main(["-s", str(discord_settings), "run"]) == 2
+    assert "DISCORD_WEBHOOK_URL" in capsys.readouterr().err
+
+
+def fake_transport(monkeypatch: pytest.MonkeyPatch, status: int) -> list[tuple[str, bytes, float]]:
+    from deal_hunter import discord
+
+    sent: list[tuple[str, bytes, float]] = []
+
+    def transport(url: str, body: bytes, timeout: float) -> discord.Reply:
+        sent.append((url, body, timeout))
+        return discord.Reply(status)
+
+    monkeypatch.setattr(discord, "urllib_transport", transport)
+    return sent
+
+
+def test_notify_test_sends_one_labelled_card(
+    discord_settings: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import json
+
+    sent = fake_transport(monkeypatch, 204)
+    assert main(["-s", str(discord_settings), "notify-test"]) == 0
+    assert len(sent) == 1 and sent[0][0] == FAKE_URL
+    message = json.loads(sent[0][1])
+    assert len(message["embeds"]) == 1 and "thumbnail" not in message["embeds"][0]
+    assert "test notification" in message["embeds"][0]["title"]
+    assert FAKE_TOKEN not in capsys.readouterr().out
+
+
+def test_notify_test_failure_exits_1_with_the_reason(
+    discord_settings: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake_transport(monkeypatch, 404)
+    assert main(["-s", str(discord_settings), "notify-test"]) == 1
+    err = capsys.readouterr().err
+    assert "404" in err and "webhook deleted or wrong" in err
+    assert FAKE_TOKEN not in err and "discord.com" not in err
+
+
+def test_notify_test_without_a_method_to_test(
+    settings: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["-s", str(settings), "notify-test"]) == 1
+    assert "discord" in capsys.readouterr().err
+
+
+def test_notify_test_rejects_a_bad_url(
+    discord_settings: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://example.com/api/webhooks/1/x")
+    sent = fake_transport(monkeypatch, 204)
+    assert main(["-s", str(discord_settings), "notify-test"]) == 2
+    assert sent == [] and "example.com" not in capsys.readouterr().err
+
+
+def test_notify_test_reports_a_rejection_as_a_failure(
+    discord_settings: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake_transport(monkeypatch, 400)
+    assert main(["-s", str(discord_settings), "notify-test"]) == 1
+    captured = capsys.readouterr()
+    assert "Sent a test card" not in captured.out
+    assert "400" in captured.err and FAKE_TOKEN not in captured.err

@@ -19,18 +19,21 @@ spec each.
   the prompt asks for, and some end in a stray `**` (markdown leaking into the
   comment); tighten the prompts and/or clean the comment before display and
   notification
-- [ ] discord-deal-alerts — post matching listings to a Discord webhook as
+- [x] discord-deal-alerts — post matching listings to a Discord webhook as
   cards (photo, price, rating, AI summary, watch); spec Ready. Alerting is
   scoped to "a product you want just got listed" (operator decision
   2026-10-15)
 
-## Up Next
-
 - [ ] bump-aimm — ai-marketplace-monitor 0.10.2 → 0.10.16: fixes the
   unconditional "Failed to get search results" upstream and adds login
   recovery / search-radius handling, but changes every function deal-hunter
-  patches (login, search, goto_url, create_page, launch_browser); re-verify
-  each patch and the saved-session flow, then a live run
+  patches (login, search, goto_url, create_page, launch_browser, and since
+  then get_listings, AIResponse.to_cache, the ai-module rating `re.match`,
+  NotificationConfig.notify_all); re-verify each patch-point test and the
+  saved-session flow, then a live run
+
+## Up Next
+
 - [ ] graduate-established — `/graduate` hardening for the established profile:
   branch protection requiring CI on `main`, CODEOWNERS, sandbox
   `failIfUnavailable` (operator applies settings/protection)

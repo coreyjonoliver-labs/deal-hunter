@@ -228,3 +228,26 @@ def test_smtp_username_must_name_one_host(
     base_settings["notify"]["smtp_server"] = "smtp.example.org"
     if "@" not in notify["smtp_username"]:
         assert parse_settings(base_settings).notify.fields["smtp_username"] == "apikey"
+
+
+def test_discord_is_a_known_method_without_extra_settings(base_settings: dict[str, Any]) -> None:
+    base_settings["notify"] = {"methods": ["discord", "ntfy"]}
+    settings = parse_settings(base_settings)
+    assert settings.notify.methods == ["discord", "ntfy"]
+    assert "ntfy_server" in settings.notify.fields
+    assert not any("discord" in key for key in settings.notify.fields)
+
+
+def test_the_webhook_url_cannot_come_from_the_settings_file(base_settings: dict[str, Any]) -> None:
+    # Unknown notify keys are ignored today; make sure none is ever carried through.
+    base_settings["notify"] = {
+        "methods": ["discord"],
+        "discord_webhook_url": "https://discord.com/api/webhooks/1/abc",
+    }
+    assert "discord_webhook_url" not in parse_settings(base_settings).notify.fields
+
+
+def test_unknown_method_message_lists_discord(base_settings: dict[str, Any]) -> None:
+    base_settings["notify"] = {"methods": ["carrier-pigeon"]}
+    with pytest.raises(SettingsError, match="discord"):
+        parse_settings(base_settings)

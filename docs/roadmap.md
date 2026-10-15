@@ -42,7 +42,7 @@ specs (ops-metrics, otel-tracing) are written and deferred.
 
 | Spec | Depends on | Status |
 |---|---|---|
-| [discord-deal-alerts](specs/discord-deal-alerts.md) | None | Ready |
+| [discord-deal-alerts](specs/discord-deal-alerts.md) | None | Complete |
 | [ops-metrics](specs/ops-metrics.md) | None | Ready (deferred) |
 | [otel-tracing](specs/otel-tracing.md) | ops-metrics | Ready (deferred) |
 

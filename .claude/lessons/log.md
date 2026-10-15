@@ -114,4 +114,45 @@ consolidates recurring ones into rules.
   tags: [parsing, fail-closed, silent-failure, alerts]
   recurrence_of: "2026-10-15 / forged rating via greedy parse (same parser, opposite failure)"
   finding: "Tightening a parser for safety must not make legitimate variants fail silently: accept the format's common drifts (case, separators, n/5) while keeping the anchor, and log when the old parser would have matched but the new one didn't — fail closed, but visibly."
+
+- date: 2026-10-15
+  source: "discord-deal-alerts / src/deal_hunter/discord.py:62 / code-reviewer (HIGH) + security-auditor (MEDIUM)"
+  importance: 7
+  mechanizable: yes
+  scope: unclassified
+  category: security
+  module: "src/deal_hunter/discord.py"
+  tags: [sanitizing, word-boundary, phishing, untrusted-text]
+  recurrence_of: "2026-10-15 / redaction of short identifiers must match on token boundaries (boundary handling in text transforms, inverse direction)"
+  finding: "A sanitizer that neutralizes something dangerous in untrusted text (URL schemes, mentions) must not depend on a word-boundary anchor: one prefixed character ('xhttps://', '_https://') slips past while the renderer still acts on it. Neutralize the dangerous token itself (every '://'), and test prefixed and adjacent forms."
+
+- date: 2026-10-15
+  source: "discord-deal-alerts / src/deal_hunter/discord.py:123 / code-reviewer + security-auditor"
+  importance: 4
+  mechanizable: yes
+  scope: unclassified
+  category: security
+  module: "src/deal_hunter/discord.py"
+  tags: [markdown, control-characters, bidi]
+  finding: "Before escaping untrusted text for a markup renderer, collapse newlines where the field is meant to be one line and strip Unicode Cc/Cf characters (bidi overrides can visually reorder prices); escaping per-character doesn't cover line-start syntax like '1. ' lists."
+
+- date: 2026-10-15
+  source: "discord-deal-alerts / deploy/kubernetes/components/cilium-egress/cnp.yaml / security-auditor"
+  importance: 5
+  mechanizable: no
+  scope: unclassified
+  category: security
+  module: "deploy/"
+  tags: [egress, exfiltration, shared-cdn]
+  finding: "Every host added to the pod-wide egress allowlist is also reachable by the unsandboxed browser: when a feature adds one (a notifier, an API), its docs must name it as a possible exfiltration channel (and shared-CDN fronting), and the compromise steps must include rotating that credential."
+
+- date: 2026-10-15
+  source: "discord-deal-alerts / src/deal_hunter/discord.py:357 / security-auditor"
+  importance: 5
+  mechanizable: yes
+  scope: unclassified
+  category: error-handling
+  module: "src/deal_hunter/discord.py"
+  tags: [fail-open, delivery, notifications, isolation]
+  finding: "Isolating a bad item (drop one rejected card so it can't block the rest) must not turn 'nothing was delivered' into success: report success only when at least one item was actually accepted, and surface the rejection — otherwise a sender that rejects everything marks all work done and hides it."
 ```
