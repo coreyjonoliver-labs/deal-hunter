@@ -34,6 +34,17 @@ radius for a compromised browser.
 | chromium-sandbox-seccomp (Research) | None | — |
 | dashboard-own-pod | chromium-sandbox-seccomp | — |
 
+## Phase 3 — Alerting & observability
+
+Objective: the buyer hears about good deals where they already look, and the
+operator hears when the monitor stops working — not only when its pod dies.
+
+| Spec | Depends on | Status |
+|---|---|---|
+| [discord-deal-alerts](specs/discord-deal-alerts.md) | None | Ready |
+| [ops-metrics](specs/ops-metrics.md) | None | Ready |
+| [otel-tracing](specs/otel-tracing.md) | ops-metrics | Ready |
+
 <!--
 Add phases as the project grows. A phase is just a grouping for sequencing; the
 contracts are the specs it lists. For a small project, one phase is fine.
