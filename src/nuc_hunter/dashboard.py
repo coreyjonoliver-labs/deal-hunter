@@ -881,6 +881,10 @@ def make_handler(settings: Settings, home: Path, hosts: set[str]) -> type[BaseHT
 
     class Handler(BaseHTTPRequestHandler):
         timeout = 15  # seconds a client may take to send its request
+        # HTTP/1.1 (some health checkers reject 1.0), but every response
+        # closes its connection — send() says so, and so does http.server's
+        # send_error — so idle keep-alives can't hold the server's few threads.
+        protocol_version = "HTTP/1.1"
 
         def version_string(self) -> str:
             return "nuc-hunter"
@@ -938,6 +942,7 @@ def make_handler(settings: Settings, home: Path, hosts: set[str]) -> type[BaseHT
             self.send_response(code)
             self.send_header("Content-Type", kind)
             self.send_header("Content-Length", str(len(body)))
+            self.send_header("Connection", "close")
             for name, value in security_headers().items():
                 self.send_header(name, value)
             self.end_headers()

@@ -507,3 +507,30 @@ def test_wildcard_bind_is_not_an_allowed_host() -> None:
     assert wildcard not in dashboard.allowed_hosts(wildcard, ["nuc.example"])
     assert "nuc.example" in dashboard.allowed_hosts(wildcard, ["nuc.example"])
     assert "10.1.2.3" in dashboard.allowed_hosts("10.1.2.3", [])
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("GET", "/healthz", ""),
+        ("GET", "/", ""),
+        ("GET", "/nope", ""),
+        ("HEAD", "/", ""),
+        ("POST", "/", "x=1"),  # http.server's send_error path (501)
+    ],
+)
+def test_server_speaks_http11_and_closes(server: int, method: str, path: str, body: str) -> None:
+    import socket
+
+    request = f"{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+    if body:
+        request += f"Content-Length: {len(body)}\r\n"
+    request += f"\r\n{body}"
+    with socket.create_connection(("127.0.0.1", server), timeout=5) as sock:
+        sock.sendall(request.encode())
+        data = b""
+        while chunk := sock.recv(65536):  # ends only if the server closes
+            data += chunk
+    status, _, rest = data.partition(b"\r\n")
+    assert status.startswith(b"HTTP/1.1 ")
+    assert b"\r\nConnection: close\r\n" in rest
