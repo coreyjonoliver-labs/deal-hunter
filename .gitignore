@@ -1,8 +1,9 @@
 # local settings may contain your location; generated config is derived
+deal-hunter.toml
 nuc-hunter.toml
 build/
 .env
-# saved Facebook login (`nuc-hunter login`), if session_file points here
+# saved Facebook login (`deal-hunter login`), if session_file points here
 *session*.json
 # write_private temp files; aimm's page dumps (a logged-in page)
 .*.tmp

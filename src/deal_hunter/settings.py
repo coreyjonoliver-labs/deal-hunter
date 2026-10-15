@@ -1,4 +1,4 @@
-"""Load and validate the user's nuc-hunter.toml.
+"""Load and validate the user's deal-hunter.toml.
 
 The settings file holds only non-secret preferences (location, budget, which
 notifier to use). Credentials never live here: the rendered config refers to
@@ -21,7 +21,7 @@ else:  # pragma: no cover
 
 
 class SettingsError(ValueError):
-    """Raised when nuc-hunter.toml is missing a value or has an invalid one."""
+    """Raised when deal-hunter.toml is missing a value or has an invalid one."""
 
 
 AI_PROVIDERS = ("anthropic", "openai", "ollama", "none")
@@ -102,7 +102,7 @@ class Settings:
     ai: AISettings
     notify: NotifySettings
     anonymous: bool
-    # Saved Facebook login (`nuc-hunter login`). It's a full login to the
+    # Saved Facebook login (`deal-hunter login`). It's a full login to the
     # account, so it's written owner-only and never logged.
     session_file: Path
     # true = never fall back to a login form or the 60-second wait: exit with
@@ -114,7 +114,7 @@ class Settings:
 
 def load_settings(path: Path) -> Settings:
     if not path.is_file():
-        raise SettingsError(f"{path} not found. Run `nuc-hunter init` to create it.")
+        raise SettingsError(f"{path} not found. Run `deal-hunter init` to create it.")
     try:
         with path.open("rb") as f:
             data = tomllib.load(f)
@@ -256,7 +256,7 @@ def _str(t: dict[str, Any], key: str, section: str, default: str | None = None) 
         raise SettingsError(f"{section}.{key} must be a string.")
     if "${" in value:
         # Settings are rendered into the aimm config, which expands ${VAR}.
-        # Secrets belong in env vars that nuc-hunter wires up itself.
+        # Secrets belong in env vars that deal-hunter wires up itself.
         raise SettingsError(f"{section}.{key} must not contain '${{'.")
     return value.strip()
 

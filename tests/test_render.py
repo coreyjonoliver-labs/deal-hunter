@@ -9,8 +9,8 @@ from typing import Any
 import pytest
 from ai_marketplace_monitor.config import Config
 
-from nuc_hunter.render import render, required_env
-from nuc_hunter.settings import NOTIFIERS, parse_settings
+from deal_hunter.render import render, required_env
+from deal_hunter.settings import NOTIFIERS, parse_settings
 
 if sys.version_info >= (3, 11):
     import tomllib

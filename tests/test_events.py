@@ -1,4 +1,4 @@
-"""The monitor's event log, which `nuc-hunter web` reads."""
+"""The monitor's event log, which `deal-hunter web` reads."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from ai_marketplace_monitor.utils import aimm_event
 
-from nuc_hunter import events
+from deal_hunter import events
 
 AI_RESPONSE = """[blue][AI-Response][/blue] Message(
     id='msg_01',
@@ -194,7 +194,7 @@ def test_home_directory_is_shortened(recorder: events.EventRecorder) -> None:
 
 
 def test_read_events_reads_only_the_newest_part(tmp_path: Path) -> None:
-    from nuc_hunter.events import LINE_CHARS, read_events
+    from deal_hunter.events import LINE_CHARS, read_events
 
     path = tmp_path / "events.jsonl"
     old = [json.dumps({"ts": i, "kind": "x"}) for i in range(1000)]
@@ -205,3 +205,20 @@ def test_read_events_reads_only_the_newest_part(tmp_path: Path) -> None:
     older = [e["ts"] for e in events[:-1]]
     assert older and min(older) > 900  # only the tail, starting at a whole line
     assert 5000 not in [e["ts"] for e in events]  # the overlong line is skipped
+
+
+def test_events_path_moves_the_old_named_file_on_run(tmp_path: Path) -> None:
+    legacy = tmp_path / events.LEGACY_EVENTS_NAME
+    legacy.write_text('{"ts": 1}\n')
+    assert events.events_path(tmp_path) == legacy  # web reads it in place
+    assert legacy.exists()
+    path = events.events_path(tmp_path, migrate=True)
+    assert path == tmp_path / events.EVENTS_NAME
+    assert path.read_text() == '{"ts": 1}\n' and not legacy.exists()
+
+
+def test_events_path_prefers_the_new_file(tmp_path: Path) -> None:
+    (tmp_path / events.LEGACY_EVENTS_NAME).write_text("old\n")
+    (tmp_path / events.EVENTS_NAME).write_text("new\n")
+    assert events.events_path(tmp_path, migrate=True) == tmp_path / events.EVENTS_NAME
+    assert (tmp_path / events.LEGACY_EVENTS_NAME).read_text() == "old\n"

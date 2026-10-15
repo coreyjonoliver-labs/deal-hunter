@@ -1,8 +1,8 @@
-"""A timestamped record of what the monitor did, for `nuc-hunter web`.
+"""A timestamped record of what the monitor did, for `deal-hunter web`.
 
 aimm's own log file has no timestamps and mixes in full API requests, so
 ``launch.main`` adds ``EventRecorder`` to the monitor's logging. It appends
-one JSON line per useful event to ``nuc-hunter-events.jsonl`` in aimm's home:
+one JSON line per useful event to ``deal-hunter-events.jsonl`` in aimm's home:
 aimm's structured events (browser start, searches, AI ratings, skips),
 token usage from each AI response, and warnings and errors.
 
@@ -25,7 +25,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-EVENTS_NAME = "nuc-hunter-events.jsonl"
+EVENTS_NAME = "deal-hunter-events.jsonl"
+# Its name before the project was renamed: `run` moves it, `web` reads it until then.
+LEGACY_EVENTS_NAME = "nuc-hunter-events.jsonl"
 MAX_BYTES = 2_000_000
 MESSAGE_CHARS = 400
 
@@ -102,7 +104,7 @@ class EventRecorder(logging.Handler):
             self._trim()
 
     def _trim(self) -> None:
-        from nuc_hunter.files import write_private
+        from deal_hunter.files import write_private
 
         lines = self.path.read_text(encoding="utf-8").splitlines(keepends=True)
         write_private(self.path, "".join(lines[len(lines) // 2 :]))
@@ -129,6 +131,20 @@ def ai_usage(message: str, ts: float) -> dict[str, Any] | None:
         return None
     models = _MODEL.findall(message[:start])
     return {"ts": ts, "kind": "ai_usage", "model": models[-1] if models else None, **usage}
+
+
+def events_path(home: Path, *, migrate: bool = False) -> Path:
+    """The events file in home, moving (migrate) or reading the old-named one if it's there."""
+    path, legacy = home / EVENTS_NAME, home / LEGACY_EVENTS_NAME
+    if os.path.lexists(path) or not os.path.lexists(legacy):
+        return path
+    if not migrate:
+        return legacy
+    try:
+        os.rename(legacy, path)
+    except OSError:
+        pass  # start a new file; the old one stays where it is
+    return path
 
 
 def attach(logger: logging.Logger, path: Path) -> None:

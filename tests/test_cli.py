@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from nuc_hunter.cli import main
+from deal_hunter.cli import main
 
 SETTINGS = """
 [location]
@@ -18,7 +18,7 @@ methods = ["ntfy"]
 
 @pytest.fixture
 def settings(tmp_path: Path) -> Path:
-    p = tmp_path / "nuc-hunter.toml"
+    p = tmp_path / "deal-hunter.toml"
     p.write_text(SETTINGS)
     return p
 
@@ -62,7 +62,9 @@ def test_run_disables_webui_by_default(
     monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
     monkeypatch.setenv("NTFY_TOPIC", "t")
     calls: list[list[str]] = []
-    monkeypatch.setattr("nuc_hunter.launch.main", lambda argv, session, sandbox: calls.append(argv))
+    monkeypatch.setattr(
+        "deal_hunter.launch.main", lambda argv, session, sandbox: calls.append(argv)
+    )
     out = str(tmp_path / "c.toml")
     main(["-s", str(settings), "run", "-o", out])
     main(["-s", str(settings), "run", "-o", out, "--webui", "--", "--verbose"])
@@ -92,7 +94,7 @@ def test_run_refuses_without_env(
 
 def test_bad_settings_exit_2(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["-s", str(tmp_path / "missing.toml"), "render"]) == 2
-    assert "nuc-hunter init" in capsys.readouterr().err
+    assert "deal-hunter init" in capsys.readouterr().err
 
 
 def test_run_ignores_packages_in_cwd(settings: Path, tmp_path: Path) -> None:
@@ -106,7 +108,7 @@ def test_run_ignores_packages_in_cwd(settings: Path, tmp_path: Path) -> None:
     fake.mkdir()
     (fake / "__init__.py").write_text("raise SystemExit('HIJACKED')\n")
     env = {**os.environ, "ANTHROPIC_API_KEY": "k", "NTFY_TOPIC": "t"}
-    exe = Path(sys.executable).parent / "nuc-hunter"
+    exe = Path(sys.executable).parent / "deal-hunter"
     result = subprocess.run(  # noqa: S603 — fixed argv, no shell
         [str(exe), "-s", str(settings), "run", "-o", "c.toml", "--", "--version"],
         cwd=tmp_path,
@@ -125,7 +127,7 @@ def aimm_calls(monkeypatch: pytest.MonkeyPatch) -> list[tuple[list[str], object]
     monkeypatch.setenv("NTFY_TOPIC", "t")
     calls: list[tuple[list[str], object]] = []
     monkeypatch.setattr(
-        "nuc_hunter.launch.main", lambda argv, session, sandbox: calls.append((argv, session))
+        "deal_hunter.launch.main", lambda argv, session, sandbox: calls.append((argv, session))
     )
     return calls
 
@@ -136,7 +138,7 @@ def write_settings(path: Path, facebook: str) -> Path:
 
 
 def test_run_passes_the_session(tmp_path: Path, aimm_calls: list[tuple[list[str], object]]) -> None:
-    from nuc_hunter.session import Session
+    from deal_hunter.session import Session
 
     fb = tmp_path / "fb.json"
     s = write_settings(tmp_path / "s.toml", f'session_file = "{fb}"\n')
@@ -160,7 +162,7 @@ def test_run_required_session_is_headless(
 ) -> None:
     from fakes import LOGIN_COOKIE, FakeContext
 
-    from nuc_hunter.session import Session, save
+    from deal_hunter.session import Session, save
 
     fb = tmp_path / "fb.json"
     save(FakeContext([LOGIN_COOKIE]), fb)
@@ -197,7 +199,7 @@ def test_run_required_session_fails_before_starting(
     s = write_settings(tmp_path / "s.toml", f'session_file = "{fb}"\nrequire_session = true\n')
     assert main(["-s", str(s), "run", "-o", str(tmp_path / "c.toml")]) == 2
     err = capsys.readouterr().err
-    assert match in err and "nuc-hunter login" in err
+    assert match in err and "deal-hunter login" in err
     assert aimm_calls == []
 
 
@@ -207,8 +209,8 @@ def test_login_saves_to_the_settings_path(
     fb = tmp_path / "fb.json"
     s = write_settings(tmp_path / "s.toml", f'session_file = "{fb}"\n')
     paths: list[Path] = []
-    monkeypatch.setattr("nuc_hunter.cli.interactive_login", paths.append)
-    monkeypatch.setattr("nuc_hunter.cli.exclude_from_backups", lambda p: paths.append(p) or False)
+    monkeypatch.setattr("deal_hunter.cli.interactive_login", paths.append)
+    monkeypatch.setattr("deal_hunter.cli.exclude_from_backups", lambda p: paths.append(p) or False)
     assert main(["-s", str(s), "login"]) == 0
     assert paths == [fb, fb]
     out, err = capsys.readouterr()
@@ -219,19 +221,19 @@ def test_login_saves_to_the_settings_path(
 def test_login_errors_are_reported(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from nuc_hunter.session import SessionError
+    from deal_hunter.session import SessionError
 
     def fail(path: Path) -> None:
         raise SessionError("not logged in after 300 seconds; nothing saved.")
 
-    monkeypatch.setattr("nuc_hunter.cli.interactive_login", fail)
+    monkeypatch.setattr("deal_hunter.cli.interactive_login", fail)
     s = write_settings(tmp_path / "s.toml", "")
     assert main(["-s", str(s), "login"]) == 2
     assert "nothing saved" in capsys.readouterr().err
 
 
 def test_login_refuses_anonymous(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("nuc_hunter.cli.interactive_login", pytest.fail)
+    monkeypatch.setattr("deal_hunter.cli.interactive_login", pytest.fail)
     s = write_settings(tmp_path / "s.toml", "anonymous = true\n")
     assert main(["-s", str(s), "login"]) == 2
 
@@ -241,7 +243,7 @@ def test_web_warns_off_loopback(
 ) -> None:
     calls: list[tuple[str, int, list[str]]] = []
     monkeypatch.setattr(
-        "nuc_hunter.dashboard.serve",
+        "deal_hunter.dashboard.serve",
         lambda s, home, host, port, extra: calls.append((host, port, extra)),
     )
     assert main(["-s", str(settings), "web", "--host", "192.0.2.1", "--allow-host", "nuc.lan"]) == 0
@@ -257,7 +259,7 @@ def test_web_port_in_use(
     def busy(*args: object) -> None:
         raise OSError(48, "Address already in use")
 
-    monkeypatch.setattr("nuc_hunter.dashboard.serve", busy)
+    monkeypatch.setattr("deal_hunter.dashboard.serve", busy)
     assert main(["-s", str(settings), "web"]) == 1
     assert "Try --port" in capsys.readouterr().err
 
@@ -267,7 +269,7 @@ def test_run_copies_a_new_seed_once(
 ) -> None:
     from fakes import LOGIN_COOKIE, FakeContext
 
-    from nuc_hunter.session import load, save
+    from deal_hunter.session import load, save
 
     seed = tmp_path / "seed" / "fb.json"
     seed.parent.mkdir()
@@ -301,13 +303,13 @@ def test_run_waits_for_a_session_then_starts_over(
     aimm_calls: list[tuple[list[str], object]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from nuc_hunter import session
-    from nuc_hunter.events import EVENTS_NAME, read_events
+    from deal_hunter import session
+    from deal_hunter.events import EVENTS_NAME, read_events
 
     sleeps: list[float] = []
     execs: list[list[str]] = []
-    monkeypatch.setattr("nuc_hunter.cli.time.sleep", sleeps.append)
-    monkeypatch.setattr("nuc_hunter.cli.os.execv", lambda exe, argv: execs.append(argv))
+    monkeypatch.setattr("deal_hunter.cli.time.sleep", sleeps.append)
+    monkeypatch.setattr("deal_hunter.cli.os.execv", lambda exe, argv: execs.append(argv))
     fb = tmp_path / "fb.json"
     s = write_settings(tmp_path / "s.toml", f'session_file = "{fb}"\nrequire_session = true\n')
     argv = ["-s", str(s), "run", "-o", str(tmp_path / "c.toml"), "--wait-for-session", "900"]
@@ -324,7 +326,7 @@ def test_run_waits_for_a_new_seed_without_loading_facebook(
 ) -> None:
     from fakes import LOGIN_COOKIE, FakeContext
 
-    from nuc_hunter.session import copy_seed, save
+    from deal_hunter.session import copy_seed, save
 
     seed = tmp_path / "seed.json"
     save(FakeContext([LOGIN_COOKIE]), seed)
@@ -332,15 +334,15 @@ def test_run_waits_for_a_new_seed_without_loading_facebook(
     copy_seed(seed, fb)  # already copied before the session failed
     sleeps: list[float] = []
     execs: list[list[str]] = []
-    monkeypatch.setattr("nuc_hunter.cli.time.sleep", sleeps.append)
-    monkeypatch.setattr("nuc_hunter.cli.os.execv", lambda exe, argv: execs.append(argv))
-    monkeypatch.setenv("NUC_HUNTER_AWAITING_SEED", "1")
+    monkeypatch.setattr("deal_hunter.cli.time.sleep", sleeps.append)
+    monkeypatch.setattr("deal_hunter.cli.os.execv", lambda exe, argv: execs.append(argv))
+    monkeypatch.setenv("DEAL_HUNTER_AWAITING_SEED", "1")
     s = write_settings(tmp_path / "s.toml", f'session_file = "{fb}"\nrequire_session = true\n')
     argv = ["-s", str(s), "run", "-o", str(tmp_path / "c.toml")]
     argv += ["--session-seed", str(seed), "--wait-for-session", "900"]
     assert main(argv) == 0
     assert aimm_calls == [] and sleeps == [900] and len(execs) == 1
-    assert os.environ["NUC_HUNTER_AWAITING_SEED"] == "1"
+    assert os.environ["DEAL_HUNTER_AWAITING_SEED"] == "1"
 
     seed.write_text('{"cookies": [{"name": "c_user", "value": "2", "domain": ".facebook.com"}]}')
     assert main(argv) == 0  # a new seed: copied and started
@@ -361,17 +363,17 @@ def test_run_restarts_after_other_errors_with_backoff(
         raise RuntimeError("Failed to navigate to https://www.facebook.com/x\nmore")
 
     sleeps: list[float] = []
-    monkeypatch.setattr("nuc_hunter.launch.main", broken)
-    monkeypatch.setattr("nuc_hunter.cli.time.sleep", sleeps.append)
-    monkeypatch.setattr("nuc_hunter.cli.os.execv", lambda exe, argv: None)
+    monkeypatch.setattr("deal_hunter.launch.main", broken)
+    monkeypatch.setattr("deal_hunter.cli.time.sleep", sleeps.append)
+    monkeypatch.setattr("deal_hunter.cli.os.execv", lambda exe, argv: None)
     if restarts is not None:
-        monkeypatch.setenv("NUC_HUNTER_RESTARTS", restarts)
+        monkeypatch.setenv("DEAL_HUNTER_RESTARTS", restarts)
     s = write_settings(tmp_path / "s.toml", f'session_file = "{tmp_path / "fb.json"}"\n')
     s.write_text(SETTINGS + "[facebook]\nanonymous = true\n")
     argv = ["-s", str(s), "run", "-o", str(tmp_path / "c.toml"), "--restart-after", "600"]
     assert main(argv) == 0
     assert sleeps == [delay]
-    assert os.environ["NUC_HUNTER_RESTARTS"] == str(int(restarts or 0) + 1)
+    assert os.environ["DEAL_HUNTER_RESTARTS"] == str(int(restarts or 0) + 1)
 
 
 def test_run_without_restart_after_still_raises(
@@ -379,7 +381,7 @@ def test_run_without_restart_after_still_raises(
 ) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
     monkeypatch.setenv("NTFY_TOPIC", "t")
-    monkeypatch.setattr("nuc_hunter.launch.main", lambda *a: (_ for _ in ()).throw(RuntimeError()))
+    monkeypatch.setattr("deal_hunter.launch.main", lambda *a: (_ for _ in ()).throw(RuntimeError()))
     s = tmp_path / "s.toml"
     s.write_text(SETTINGS + "[facebook]\nanonymous = true\n")
     with pytest.raises(RuntimeError):
@@ -387,7 +389,7 @@ def test_run_without_restart_after_still_raises(
 
 
 def test_interrupt_exits_130(settings: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from nuc_hunter import cli
+    from deal_hunter import cli
 
     def interrupted(*a: object, **k: object) -> int:
         cli._interrupt(15, None)  # what SIGTERM does
@@ -395,3 +397,12 @@ def test_interrupt_exits_130(settings: Path, monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr(cli, "_check", interrupted)
     assert main(["-s", str(settings), "check", "nuc"]) == 130
+
+
+def test_old_settings_name_still_loads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "nuc-hunter.toml").write_text(SETTINGS)
+    assert main(["render", "-o", str(tmp_path / "c.toml")]) == 0
+    assert "rename it to deal-hunter.toml" in capsys.readouterr().err

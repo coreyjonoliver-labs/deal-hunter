@@ -1,8 +1,8 @@
 """Save a Facebook login once and reuse it, instead of logging in on every start.
 
-``nuc-hunter login`` opens a browser, waits for you to log in (2FA and
+``deal-hunter login`` opens a browser, waits for you to log in (2FA and
 checkpoints included), and saves the browser's cookies and local storage with
-Playwright's ``storage_state``. ``nuc-hunter run`` loads that file into the
+Playwright's ``storage_state``. ``deal-hunter run`` loads that file into the
 monitor's browser (see launch.py).
 
 The file is a full login to the account: anyone who has it is logged in as
@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from nuc_hunter.files import write_private
+from deal_hunter.files import write_private
 
 FACEBOOK = "https://www.facebook.com"
 LOGIN_URL = "https://www.facebook.com/login/"
@@ -51,7 +51,7 @@ class Session:
 
 
 # Browser environment allow-list: the browser renders untrusted pages, so it
-# doesn't get the API keys and tokens in nuc-hunter's environment.
+# doesn't get the API keys and tokens in deal-hunter's environment.
 _BROWSER_ENV = ("PATH", "HOME", "TMPDIR", "LANG", "TZ", "DISPLAY", "WAYLAND_DISPLAY")
 _BROWSER_ENV_PREFIXES = ("LC_", "XDG_", "FONTCONFIG_")
 
@@ -113,7 +113,7 @@ def load(path: Path) -> dict[str, Any] | None:
     if not isinstance(state, dict) or not isinstance(state.get("cookies"), list):
         # Don't echo the contents: they're credentials.
         raise SessionError(
-            f"{path} is not a saved session (damaged?). Delete it, then run `nuc-hunter login`."
+            f"{path} is not a saved session (damaged?). Delete it, then run `deal-hunter login`."
         )
     return state
 
@@ -178,7 +178,7 @@ def seed_mark_path(path: Path) -> Path:
 
 
 def meta_path(path: Path) -> Path:
-    """Where save() records when it saved, for `nuc-hunter web` (which never reads path).
+    """Where save() records when it saved, for `deal-hunter web` (which never reads path).
 
     Always in aimm's home, wherever the session itself is, so the session can
     live somewhere `web` can't read (in a pod, a volume only the monitor mounts).

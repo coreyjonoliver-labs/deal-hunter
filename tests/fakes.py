@@ -1,4 +1,4 @@
-"""Stand-ins for the Playwright objects nuc-hunter's session code touches."""
+"""Stand-ins for the Playwright objects deal-hunter's session code touches."""
 
 from __future__ import annotations
 
