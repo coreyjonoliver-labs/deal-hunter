@@ -52,7 +52,9 @@ rating = 3                  # notify for AI rating >= this (1-5), unless a watch
 # base_url = "http://localhost:11434/v1"   # ollama only
 
 [notify]
-# Any of: ntfy, pushover, telegram, pushbullet, email. Empty = console only.
+# Any of: ntfy, pushover, telegram, pushbullet, email, discord. Empty = console only.
+# discord posts a card per deal to the webhook in the DISCORD_WEBHOOK_URL env var
+# (never put the URL here); try it with `deal-hunter notify-test`.
 methods = []
 # ntfy_server = "https://ntfy.sh"   # ntfy only; set for a self-hosted server
 # email = "you@example.com"         # required for the email method

@@ -69,6 +69,7 @@ Edit `deal-hunter.toml`:
 | `["telegram"]` | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
 | `["pushbullet"]` | `PUSHBULLET_TOKEN` |
 | `["email"]` (+ `notify.email`) | `SMTP_PASSWORD` |
+| `["discord"]` | `DISCORD_WEBHOOK_URL` |
 | Facebook login (optional; `deal-hunter login` is better) | `FACEBOOK_USERNAME`, `FACEBOOK_PASSWORD` |
 
 For email, set `notify.smtp_server` / `smtp_username` / `smtp_port` unless your
@@ -78,6 +79,29 @@ provider uses `smtp.<your domain>` on port 587 (Gmail does; use an app password)
 `ntfy` is the easiest way to get phone alerts. Install the ntfy app, subscribe
 to a long random topic name, and set `NTFY_TOPIC` to that name. Anyone who knows
 the topic can read it, so treat it like a password.
+
+### Discord alerts
+
+Add `"discord"` to `notify.methods` and set `DISCORD_WEBHOOK_URL` to a channel
+webhook (channel settings, Integrations, Webhooks). When a listing rates at or
+above its watch's `rating`, the channel gets a card: title (linked to the
+Marketplace page), photo, price, condition, town, the AI's rating and summary,
+the watch's name and why you're seeing it (new, price drop, updated, reminder).
+It never includes the listing's description. Discord works alongside the other
+methods; a listing counts as notified when any method sent it, and if only
+Discord is enabled and it's unreachable, the listing is tried again next cycle.
+
+The webhook URL is a credential: anyone who has it can post to the channel. It
+comes from the environment only, must be `https://discord.com/api/webhooks/...`
+(or `discordapp.com`, `ptb.discord.com`, `canary.discord.com`; all are sent
+to `discord.com`), is never logged,
+and `run` exits with an error if it doesn't look like one. Seller text on a card
+is escaped so it can't ping anyone or hide a link, and redirects are never
+followed. Check the webhook any time with:
+
+```sh
+uv run deal-hunter notify-test    # posts one "deal-hunter test notification" card
+```
 
 ### Watches
 
@@ -220,7 +244,7 @@ other host name and pages loaded by other websites, so other sites can't read
 it through your browser. It never reads the Facebook session itself, only a
 small `facebook-session.meta.json` in `~/.ai-marketplace-monitor` (when it
 was saved, when it expires) that each save writes. Warnings shown on the page have secret-looking
-environment values (API keys, tokens, ntfy topic) replaced with
+environment values (API keys, tokens, ntfy topic, webhook URLs) replaced with
 `[redacted]`.
 
 To reach it from other machines, keep it on 127.0.0.1 and put a proxy that
@@ -279,7 +303,7 @@ A search and a listing page load from `www.facebook.com`,
 `static.xx.fbcdn.net`, `scontent.xx.fbcdn.net` and
 `<name>.<pop>.fna.fbcdn.net` (images from the nearest Facebook CDN site),
 all on 443. Add your AI provider (`api.anthropic.com`, `api.openai.com`) and
-notifier (`ntfy.sh`, `api.pushover.net`, …).
+notifier (`ntfy.sh`, `api.pushover.net`, `discord.com` for Discord, …).
 
 Log in on a desktop with `deal-hunter login`, then give the container the
 saved file read-only (a secret mount, or a bind mount) and pass it to `run`

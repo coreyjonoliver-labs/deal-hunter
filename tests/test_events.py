@@ -333,3 +333,36 @@ def test_location_match_respects_word_edges(
 ) -> None:
     rec = events.EventRecorder(tmp_path / "e.jsonl", secrets=[], hidden=[slug])
     assert rec.redact(text) == expected
+
+
+WEBHOOK = "https://discord.com/api/webhooks/1234567890/FAKE-token_0123456789abcdef"
+
+
+@pytest.mark.parametrize("name", ["DISCORD_WEBHOOK_URL", "ALERTS_WEBHOOK", "slack_webhook_url"])
+def test_webhook_urls_and_their_tokens_are_redacted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    monkeypatch.setenv(name, WEBHOOK)
+    rec = events.EventRecorder(tmp_path / "e.jsonl")
+    for text in (f"POST {WEBHOOK} failed", "token FAKE-token_0123456789abcdef alone"):
+        event = rec.to_event(record(text, logging.ERROR))
+        assert event is not None
+        assert "FAKE-token" not in event["message"] and "1234567890/" not in event["message"]
+    quoted = rec.to_event(record("GET %2Fapi%2Fwebhooks failed", logging.ERROR))
+    assert quoted is not None  # the path alone is not a secret
+
+
+def test_a_webhook_without_a_token_segment_adds_nothing_odd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("X_WEBHOOK_URL", "abc")
+    assert "abc" not in events.secret_values()  # too short to be a useful secret
+
+
+def test_other_env_names_are_unaffected_by_the_webhook_rule(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WEBHOOK_DOCS_PATH", "plain-value-here")
+    monkeypatch.setenv("MY_WEBHOOK_URL_NOTES", "other-plain-value")
+    assert "plain-value-here" not in events.secret_values()
+    assert "other-plain-value" not in events.secret_values()

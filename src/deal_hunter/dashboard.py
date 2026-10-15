@@ -45,6 +45,7 @@ from urllib.parse import parse_qs, quote, urlparse
 
 from deal_hunter import session as fb_session
 from deal_hunter.events import events_path, read_events
+from deal_hunter.links import cdn_image_url, item_url
 from deal_hunter.settings import Settings
 from deal_hunter.summary import cap, clean_summary
 
@@ -62,7 +63,6 @@ DAY = 86_400
 MAX_TS = 4_102_444_800  # 2100-01-01: anything later is junk, not a date
 # A search can run late by this much before the monitor counts as stalled.
 STALL_GRACE_S = 30 * 60
-_ITEM_URL = re.compile(r"^\d{1,25}$")
 _PRICE = re.compile(r"\$\s*([\d,]+(?:\.\d+)?)")
 
 
@@ -91,26 +91,11 @@ class Result:
 
     @property
     def url(self) -> str | None:
-        if _ITEM_URL.match(self.id):
-            return f"https://www.facebook.com/marketplace/item/{self.id}/"
-        return None
+        return item_url(self.id)
 
     def image_url(self, now: float) -> str | None:
         """The photo, if it's on Facebook's CDN and its signed link hasn't expired."""
-        if "\\" in self.image or "@" in self.image or any(c.isspace() for c in self.image):
-            return None  # browsers and urlparse can disagree on the host
-        parsed = urlparse(self.image)
-        host = parsed.hostname or ""
-        if parsed.scheme != "https" or not (host == "fbcdn.net" or host.endswith(".fbcdn.net")):
-            return None
-        # oe= is the link's expiry, as hex Unix time; after it the CDN returns 403.
-        expiry = parse_qs(parsed.query).get("oe", [""])[0]
-        try:
-            if int(expiry, 16) < now:
-                return None
-        except ValueError:
-            pass
-        return self.image
+        return cdn_image_url(self.image, now)
 
 
 @dataclass

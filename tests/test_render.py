@@ -218,3 +218,28 @@ def test_smtp_destination_follows_aimm_sender(base_settings: dict[str, Any]) -> 
     assert secret_destinations(parse_settings(base_settings))[-1] == (
         "SMTP password -> smtp.mail.example.net"
     )
+
+
+def test_discord_needs_its_env_var_but_renders_nothing(
+    tmp_path: Path, base_settings: dict[str, Any]
+) -> None:
+    from deal_hunter.render import render, required_env
+
+    base_settings["notify"] = {"methods": ["discord"]}
+    settings = parse_settings(base_settings)
+    assert "DISCORD_WEBHOOK_URL" in required_env(settings)
+    text = render(settings)
+    assert "discord" not in text.lower() and "webhook" not in text.lower()
+    # aimm loads the config, and its user has no notifier fields beyond the default.
+    cfg = _load(tmp_path, base_settings)
+    assert cfg.user["me"].name == "me"
+
+
+def test_discord_alongside_an_aimm_notifier(base_settings: dict[str, Any]) -> None:
+    from deal_hunter.render import build_config, required_env
+
+    base_settings["notify"] = {"methods": ["discord", "ntfy"]}
+    settings = parse_settings(base_settings)
+    assert {"DISCORD_WEBHOOK_URL", "NTFY_TOPIC"} <= set(required_env(settings))
+    user = build_config(settings)["user"]["me"]
+    assert user["ntfy_topic"] == "${NTFY_TOPIC}" and "discord" not in str(user).lower()

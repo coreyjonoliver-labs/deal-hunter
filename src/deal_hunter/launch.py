@@ -59,8 +59,17 @@
    literal, tests/test_launch.py fails (``test_rating_regex_patch_points_still_exist``)
    rather than letting the greedy match back in.
 
+9. Discord is a notification method. aimm has no Discord notifier, and its
+   notifiers are found through ``NotificationConfig.__subclasses__()``, so
+   ``notify_all`` is wrapped instead. It is a classmethod that calls each
+   subclass's ``notify`` and then recurses with ``subclass.notify_all(...)``;
+   subclasses inherit the patched classmethod, so the card is posted only when
+   ``cls is NotificationConfig`` (the call ``User.notify`` makes), never once
+   per subclass. The result is ``upstream or discord_ok``, which is what makes
+   aimm record the listings as notified (see discord.py).
+
 ``deal-hunter run`` starts aimm through ``main`` in the same process, which
-applies all eight. aimm is pinned, and tests/test_launch.py checks the patch points
+applies all nine. aimm is pinned, and tests/test_launch.py checks the patch points
 still exist.
 
 This deliberately has no ``python -m`` entry: ``-m`` puts the current
@@ -83,11 +92,13 @@ from typing import Any
 from ai_marketplace_monitor.ai import AIResponse
 from ai_marketplace_monitor.facebook import FacebookMarketplace, FacebookSearchResultPage
 from ai_marketplace_monitor.monitor import MarketplaceMonitor
+from ai_marketplace_monitor.notification import NotificationConfig
 from ai_marketplace_monitor.utils import aimm_event, amm_home, is_substring
 from playwright.sync_api import Error as PlaywrightError
 
-from deal_hunter import events
+from deal_hunter import discord, events
 from deal_hunter import session as fb_session
+from deal_hunter.discord import DiscordWebhook
 from deal_hunter.session import Session, SessionError
 from deal_hunter.summary import cap, clean_summary
 
@@ -151,6 +162,11 @@ _upstream_search = FacebookMarketplace.search
 _upstream_get_listings = FacebookSearchResultPage.get_listings
 _upstream_to_cache = AIResponse.to_cache
 _summary_warned = False
+# The plain function behind aimm's classmethod: calling it with a subclass as cls
+# keeps aimm's own recursion (`cls.__subclasses__()`) walking that subclass.
+_upstream_notify_all = NotificationConfig.__dict__["notify_all"].__func__
+# Set by main when the discord method is enabled. None = aimm's notifiers only.
+DISCORD: DiscordWebhook | None = None
 
 # The literal in both backends' evaluate (checked by tests/test_launch.py), and
 # the strict form: a line-initial "rating" (after whitespace and markdown only: not
@@ -217,6 +233,33 @@ def to_cache_with_clean_summary(
             f"[AI] Kept an AI rating summary as written: {reason}. Further cases are not logged."
         )
     _upstream_to_cache(self, listing, item_config, marketplace_config, local_cache)
+
+
+def notify_all_with_discord(
+    cls: Any, /, config: Any, listings: Any, ratings: Any, statuses: Any, **kwargs: Any
+) -> bool:
+    """aimm's NotificationConfig.notify_all, then the Discord cards on the top-level call.
+
+    aimm calls this once per batch (User.notify) and the upstream body calls
+    ``subclass.notify_all`` for every notifier class, which reaches this wrapper
+    again with cls set to that subclass: only the call with cls is
+    NotificationConfig posts. The return value is what aimm uses to decide
+    whether to mark the listings notified, so Discord's success counts exactly
+    like another notifier's. Discord problems are logged, never raised.
+    """
+    upstream_result: bool = _upstream_notify_all(cls, config, listings, ratings, statuses, **kwargs)
+    if cls is not NotificationConfig or DISCORD is None:
+        return upstream_result
+    try:
+        discord_ok = discord.notify(
+            DISCORD, listings, ratings, statuses, force=bool(kwargs.get("force", False))
+        )
+    except Exception as e:  # noqa: BLE001 — a card bug must not stop the other notifiers' result
+        logging.getLogger("monitor").error(
+            f"[Discord] Couldn't build the cards: {type(e).__name__}"
+        )
+        discord_ok = False
+    return upstream_result or discord_ok
 
 
 def create_page_with_session(self: Any, swap_proxy: bool = False) -> Any:
@@ -456,13 +499,19 @@ def hidden_values(args: list[str]) -> list[str]:
     return []
 
 
-def main(args: list[str], session: Session | None = None, sandbox: bool = True) -> None:
+def main(
+    args: list[str],
+    session: Session | None = None,
+    sandbox: bool = True,
+    discord_url: str | None = None,
+) -> None:
     """Patch aimm, then run aimm's CLI with args. Exits via SystemExit."""
-    global SESSION, SANDBOX
+    global SESSION, SANDBOX, DISCORD
     from ai_marketplace_monitor import ai, facebook, marketplace, monitor
     from ai_marketplace_monitor.cli import app
 
     SESSION, SANDBOX = session, sandbox
+    DISCORD = DiscordWebhook(discord_url) if discord_url else None
     os.umask(0o077)
     fb_session.private_home()  # files aimm already created, before the umask
     # For `deal-hunter web`: aimm logs to the "monitor" logger.
@@ -479,6 +528,7 @@ def main(args: list[str], session: Session | None = None, sandbox: bool = True) 
     facebook.FacebookSearchResultPage.get_listings = get_listings_counted  # type: ignore[method-assign]
     setattr(ai, "re", StrictRatingRe())  # noqa: B010 — aimm's own module-level import
     ai.AIResponse.to_cache = to_cache_with_clean_summary  # type: ignore[method-assign]
+    NotificationConfig.notify_all = classmethod(notify_all_with_discord)  # type: ignore[assignment]
     monitor.MarketplaceMonitor._launch_browser = launch_browser  # type: ignore[method-assign]
     monitor.MarketplaceMonitor.__init__ = monitor_init  # type: ignore[method-assign]
     app(args=args, prog_name="ai-marketplace-monitor")

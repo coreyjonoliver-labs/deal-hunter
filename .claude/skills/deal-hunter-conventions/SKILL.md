@@ -56,7 +56,9 @@ a scratch copy of `deploy/compose/` with empty `.env`, `deal-hunter.toml` and
 - **Cover the failure paths:** every new settings key gets bad-value cases in a
   parametrized `test_bad_*`, matched on the error message.
 - No network in tests, no sleeping on real time (patch `time.sleep` /
-  pass `now=`), no skipped tests without a reason.
+  pass `now=`; the Discord sender takes an injectable `sleep` and transport), no
+  skipped tests without a reason. Code that does HTTP is tested against a local
+  `http.server` on an ephemeral port (`tests/test_discord.py`), not a mock.
 - No coverage threshold is configured; cover the behavior a spec asks for and
   the error branches.
 
@@ -156,6 +158,19 @@ and controls aimm's home directory; the dashboard has no login.
 - **Network destinations of secrets** are validated: `ai.base_url` and
   `notify.ntfy_server` must be https (http only to loopback); `run` prints which
   hosts get the AI key and notifier secrets.
+- **Notifications deal-hunter sends itself (Discord)** are outside aimm, so the
+  rules are ours: the webhook URL is a bearer credential read from
+  `DISCORD_WEBHOOK_URL` only, validated at `run`/`notify-test` (https on
+  Discord's hosts, `/api/webhooks/<id>/<token>`), never in a log, event,
+  exception or the dashboard (errors say "the Discord webhook"; `events.py`
+  treats `*WEBHOOK(_URL)` env values and the URL's token as secret). Requests
+  go to that host only: no redirects, 10 s timeout, bounded retries. A card
+  carries listing and AI text, which is untrusted: clean the AI summary
+  first, then escape all of it (`discord.escape_markdown`), set
+  `allowed_mentions` to none, never include the description body, and take
+  links only from `links.py`. The aimm hook is `notify_all`, posting only on
+  the top-level call (`cls is NotificationConfig`), because aimm recurses into
+  every notifier subclass with the same classmethod.
 - **Dependencies:** `ai-marketplace-monitor` is pinned exactly; everything is
   locked in `uv.lock` (install with `uv sync --locked`). Docker base images are
   pinned by digest. A new dependency needs a stated reason.
@@ -181,7 +196,9 @@ and controls aimm's home directory; the dashboard has no login.
   `settings` (load/validate), `profile` (presets, prompts, keyword data),
   `render` (aimm config), `launch` (aimm patches + start), `session` (Facebook
   login save/load), `events` (event log), `dashboard` (`web`), `filters`
-  (aimm's filters applied outside it), `files` (private writes).
+  (aimm's filters applied outside it), `files` (private writes), `discord`
+  (Discord cards and the webhook sender), `links` (the allowlisted Marketplace
+  item and fbcdn photo URLs, shared by the dashboard and Discord).
 - snake_case functions, UPPER_CASE module constants, leading underscore for
   module-private helpers. Domain data (keywords, prompts) is plain data in
   `profile.py` so it can be tested.
@@ -238,6 +255,17 @@ skill or `CLAUDE.md` covers, update this checklist too.
 3. Tests: defaults, valid values, a parametrized bad-value case, and the rendered
    config loading in aimm's `Config`.
 4. Docs: `example-settings.toml`, README.
+
+### Add a notification method
+1. aimm has it: add it to `settings.NOTIFIERS` (env vars rendered as
+   `${ENV_VAR}` onto the aimm `[user]` section) and `NOTIFIER_SETTINGS` if it
+   needs plain settings; test it in `test_render.py`.
+2. aimm doesn't (Discord): add it to `settings.DEAL_HUNTER_NOTIFIERS` (listed
+   by `required_env`, never rendered), send from the `launch.notify_all`
+   wrapper, validate its secret at `run`, extend `events.py` redaction, and
+   add it to `notify-test`.
+3. Docs: README table and section, `example-settings.toml`, the egress host in
+   `deploy/README.md` and `cilium-egress/cnp.yaml`.
 
 ### Add a preset
 1. Add tuned search phrases, keywords, antikeywords (the whole list, including

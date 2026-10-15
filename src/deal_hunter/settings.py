@@ -47,6 +47,11 @@ NOTIFIERS: dict[str, dict[str, str]] = {
     "email": {"smtp_password": "SMTP_PASSWORD"},
 }
 
+# Notifiers deal-hunter sends itself (aimm doesn't know them, so nothing is
+# rendered into its config): method -> the env vars it needs.
+DISCORD_WEBHOOK_ENV = "DISCORD_WEBHOOK_URL"
+DEAL_HUNTER_NOTIFIERS: dict[str, list[str]] = {"discord": [DISCORD_WEBHOOK_ENV]}
+
 # Notifier -> {aimm field: settings key} for plain, non-secret values that
 # upstream requires or cannot always guess. Defaults live in parse_settings.
 NOTIFIER_SETTINGS: dict[str, list[str]] = {
@@ -201,10 +206,11 @@ def parse_settings(data: dict[str, Any]) -> Settings:
         raise SettingsError("ai.base_url must be https://, or http:// to localhost.")
 
     methods = _str_list(notify, "methods", "notify")
-    unknown = [m for m in methods if m not in NOTIFIERS]
+    known = [*NOTIFIERS, *DEAL_HUNTER_NOTIFIERS]
+    unknown = [m for m in methods if m not in known]
     if unknown:
         raise SettingsError(
-            f"notify.methods has unknown {unknown}; choose from {', '.join(NOTIFIERS)}."
+            f"notify.methods has unknown {unknown}; choose from {', '.join(known)}."
         )
     fields: dict[str, str | int] = {}
     if "ntfy" in methods:

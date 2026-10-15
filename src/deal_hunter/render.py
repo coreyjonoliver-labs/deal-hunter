@@ -12,7 +12,13 @@ from urllib.parse import urlparse
 import tomli_w
 
 from deal_hunter import profile
-from deal_hunter.settings import NOTIFIERS, Settings, WatchSettings, quote_phrase
+from deal_hunter.settings import (
+    DEAL_HUNTER_NOTIFIERS,
+    NOTIFIERS,
+    Settings,
+    WatchSettings,
+    quote_phrase,
+)
 
 USER = "me"
 MARKETPLACE = "facebook"
@@ -59,7 +65,8 @@ def required_env(settings: Settings) -> list[str]:
     if settings.ai.provider in _AI_KEY_ENV:
         names.append(_AI_KEY_ENV[settings.ai.provider])
     for method in settings.notify.methods:
-        names.extend(NOTIFIERS[method].values())
+        names.extend(NOTIFIERS[method].values() if method in NOTIFIERS else [])
+        names.extend(DEAL_HUNTER_NOTIFIERS.get(method, []))
     return names
 
 
@@ -107,7 +114,8 @@ def build_config(settings: Settings) -> dict[str, Any]:
     # are inlined on the user, so aimm uses every method configured here.
     user: dict[str, Any] = {"with_description": 200}
     for method in settings.notify.methods:
-        for field_name, env in NOTIFIERS[method].items():
+        # deal-hunter's own methods (Discord) are unknown to aimm: nothing to render.
+        for field_name, env in NOTIFIERS.get(method, {}).items():
             user[field_name] = f"${{{env}}}"
     user.update(settings.notify.fields)
     config["user"] = {USER: user}

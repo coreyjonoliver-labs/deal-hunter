@@ -1,6 +1,6 @@
 # Spec: Discord deal alerts
 
-**Status:** Ready
+**Status:** Complete
 **Kind:** Implementation
 **Author:** Corey Oliver
 **Date:** 2026-10-15
@@ -84,7 +84,10 @@ incidents) and deliberately don't go through Prometheus. Ops alerting is the
 6. Every message shall set `allowed_mentions` to `{"parse": []}`, and all
    seller- or AI-derived text shall have Discord markdown escaped (`\ * _ ~ `
    | > # - [ ] ( )` and leading `@`) so it renders literally: no pings, no
-   masked links, no formatting injection.
+   masked links, no formatting injection. The AI summary shall first go through
+   `summary.clean_summary` (already applied when aimm caches it; applied
+   again here because it's idempotent and older cached ratings predate it),
+   then be escaped — escaping always comes after cleaning, never before.
 7. Posting shall use a 10-second timeout and shall not follow redirects. On HTTP
    429 it shall wait `retry_after` (capped at 60 s) and retry, up to 3
    attempts per batch; on 5xx or a network error it shall retry with backoff
@@ -145,6 +148,7 @@ Then one sample card arrives and the command exits 0
 | File | Change | Notes |
 |---|---|---|
 | `src/deal_hunter/discord.py` | create | payload building (escape, truncate, batch), sender (urllib, no redirects, retries) |
+| `src/deal_hunter/links.py` | create | item-URL and fbcdn-image rules shared with the dashboard |
 | `src/deal_hunter/launch.py` | edit | patch `NotificationConfig.notify_all` (top-level only); docstring list of fixes |
 | `src/deal_hunter/settings.py` | edit | `discord` method; deal-hunter-owned methods kept out of aimm's `NOTIFIERS` mapping |
 | `src/deal_hunter/render.py` | edit | `required_env` includes `DISCORD_WEBHOOK_URL`; nothing Discord rendered |

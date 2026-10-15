@@ -47,6 +47,9 @@ _KINDS = {"search_summary", "browser_ready", "search_results"}
 _FIELDS = {"item", "new_count", "engine", "sandbox", "phrase_index", "count"}
 # Env vars whose values never go in the file.
 _SECRET_ENV = re.compile(r"(KEY|TOKEN|PASSWORD|SECRET|TOPIC|CHAT_ID|USERNAME|CREDENTIALS?)$")
+# A webhook URL ends in its token, which is a secret on its own (a log line may
+# carry the token without the rest of the URL).
+_WEBHOOK_ENV = re.compile(r"WEBHOOK(?:_URL)?$")
 _OVERRIDE = re.compile(r"Overriding .* with value ")
 # aimm 0.10.2 logs this error after every phrase search, whatever it found
 # (tests/test_launch.py pins that). The truth is the search_results event.
@@ -57,7 +60,16 @@ _FALSE_SEARCH_FAILURE = re.compile(r"\[Search\] Failed to get search results for
 
 def secret_values() -> list[str]:
     """Secret-looking env values, and their URL-encoded forms, longest first."""
-    values = {v for k, v in os.environ.items() if _SECRET_ENV.search(k.upper()) and len(v) >= 4}
+    values = {
+        v
+        for k, v in os.environ.items()
+        if (_SECRET_ENV.search(k.upper()) or _WEBHOOK_ENV.search(k.upper())) and len(v) >= 4
+    }
+    for k, v in os.environ.items():
+        if _WEBHOOK_ENV.search(k.upper()):
+            token = v.strip().split("?")[0].rstrip("/").rpartition("/")[2]
+            if len(token) >= 8:
+                values.add(token)
     values |= {quote(v, safe="") for v in values}
     return sorted(values, key=len, reverse=True)
 
