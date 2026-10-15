@@ -597,3 +597,20 @@ def test_rating_watch_decides_and_best_rating_wins(
     by_id = {r.id: r for r in dashboard.collect(settings, home, NOW).results}
     assert (by_id["1"].watch, by_id["1"].score, by_id["1"].comment) == ("cheap pc", 5, "steal")
     assert by_id["2"].watch == "cheap pc" and by_id["2"].dropped == ["price outside 0-100"]
+
+
+def test_collect_reuses_filter_results(
+    settings: Settings, home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from deal_hunter import filters
+
+    memo: dict[tuple[str, ...], dict[str, list[str]]] = {}
+    first = dashboard.collect(settings, home, NOW, memo)
+    assert len(memo) == 5
+
+    def boom(*args: object, **kwargs: object) -> list[str]:
+        raise AssertionError("recomputed")
+
+    monkeypatch.setattr(filters, "drop_reasons", boom)
+    again = dashboard.collect(settings, home, NOW, memo)
+    assert [r.dropped for r in again.results] == [r.dropped for r in first.results]

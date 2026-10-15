@@ -19,7 +19,7 @@ from deal_hunter import session as fb_session
 from deal_hunter.session import Session, SessionError
 
 # What a mini-pc watch drops on.
-ANTIKEYWORDS = profile.COMMON_ANTIKEYWORDS + profile.MINI_PC_ANTIKEYWORDS
+ANTIKEYWORDS = profile.MINI_PC_ANTIKEYWORDS
 
 TRIMMER = (
     "Toro 60V Revolution String Trimmer (battery not included)  "

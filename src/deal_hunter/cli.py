@@ -11,7 +11,7 @@ from importlib import resources
 from pathlib import Path
 
 from deal_hunter.files import write_private
-from deal_hunter.render import build_config, render, required_env
+from deal_hunter.render import build_config, render, required_env, secret_destinations
 from deal_hunter.session import (
     LOGIN_TIMEOUT_S,
     Session,
@@ -357,6 +357,8 @@ def _start(
     if settings.anonymous or settings.require_session:  # no one is there to log in
         argv.append("--headless")
     argv += aimm_args
+    if destinations := secret_destinations(settings):
+        print(f"Using {settings_path}: {', '.join(destinations)}", flush=True)
     print("Starting: ai-marketplace-monitor", " ".join(argv), flush=True)
     # In this process, not `python -m`: that would put the current directory
     # first on sys.path. launch.main applies deal-hunter's fixes to aimm.

@@ -59,6 +59,7 @@ services:
       - /tmp
       - /work:uid=1000,gid=1000
     mem_limit: 2g
+    cpus: 2
     volumes:
       - aimm:/home/hunter/.ai-marketplace-monitor
       - session:/session

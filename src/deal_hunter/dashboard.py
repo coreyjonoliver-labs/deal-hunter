@@ -238,7 +238,15 @@ def _decode_rows(rows: Iterable[tuple[Any, ...]]) -> list[tuple[Any, Any, float]
     return entries
 
 
-def collect(settings: Settings, home: Path, now: float | None = None) -> Snapshot:
+def collect(
+    settings: Settings,
+    home: Path,
+    now: float | None = None,
+    memo: dict[tuple[str, ...], dict[str, list[str]]] | None = None,
+) -> Snapshot:
+    """Everything the page needs. memo carries filter results between calls
+    (the settings don't change while `web` runs); it's left holding only
+    the current listings', so it never outgrows the cache."""
     from ai_marketplace_monitor.listing import Listing
 
     now = time.time() if now is None else now
@@ -275,6 +283,8 @@ def collect(settings: Settings, home: Path, now: float | None = None) -> Snapsho
     names = list(items)
     seller_locations = config["marketplace"]["facebook"].get("seller_locations")
     results = []
+    seen = memo if memo is not None else {}
+    current: dict[tuple[str, ...], dict[str, list[str]]] = {}
     for listing_id, (details, stored) in listings.items():
         result = Result(
             id=listing_id,
@@ -305,12 +315,16 @@ def collect(settings: Settings, home: Path, now: float | None = None) -> Snapsho
         if best is not None:
             result.score, result.rated_at, result.watch, result.comment = best
         text = f"{result.title}  {result.description}"
-        per_item = {
-            name: drop_reasons(
-                item, text, parse_price(result.price), result.location, seller_locations
-            )
-            for name, item in items.items()
-        }
+        memo_key = (result.title, result.description, result.price, result.location)
+        per_item = seen.get(memo_key)
+        if per_item is None:
+            per_item = {
+                name: drop_reasons(
+                    item, text, parse_price(result.price), result.location, seller_locations
+                )
+                for name, item in items.items()
+            }
+        current[memo_key] = per_item
         if result.watch is not None:
             # Judged by the watch that rated it, whatever the others say.
             result.dropped = per_item[result.watch]
@@ -319,6 +333,9 @@ def collect(settings: Settings, home: Path, now: float | None = None) -> Snapsho
             if per_item and result.watch is None:
                 result.dropped = next(iter(per_item.values()))
         results.append(result)
+    if memo is not None:
+        memo.clear()
+        memo.update(current)
     cache_db = home / "cache.db"
     return Snapshot(
         results=results,
@@ -875,6 +892,7 @@ class SnapshotCache:
         self.key: tuple[Any, ...] | None = None
         self.snap: Snapshot | None = None
         self.at = 0.0
+        self.memo: dict[tuple[str, ...], dict[str, list[str]]] = {}
 
     def _key(self) -> tuple[Any, ...]:
         paths = [self.home / "cache.db", self.home / "cache.db-wal", events_path(self.home)]
@@ -892,7 +910,7 @@ class SnapshotCache:
         with self.lock:
             key, now = self._key(), time.time()
             if self.snap is None or key != self.key or now - self.at > self.MAX_AGE_S:
-                self.snap = collect(self.settings, self.home, now)
+                self.snap = collect(self.settings, self.home, now, self.memo)
                 # After, not before: the first read itself creates cache.db-wal.
                 # A change during the read is picked up within MAX_AGE_S.
                 self.key, self.at = self._key(), now

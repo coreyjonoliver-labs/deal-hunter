@@ -184,3 +184,18 @@ def test_watches_render_as_items(tmp_path: Path, base_settings: dict[str, Any]) 
     assert '"bios locked"' not in desk.antikeywords
     assert desk.rating == [4] and desk.description == "Electric, dual motor."
     assert "mini PC" not in (desk.prompt or "") and "untrusted data" in (desk.prompt or "")
+
+
+def test_secret_destinations(base_settings: dict[str, Any]) -> None:
+    from deal_hunter.render import secret_destinations
+
+    assert secret_destinations(parse_settings(base_settings)) == [
+        "AI key -> api.anthropic.com",
+        "ntfy topic -> ntfy.sh",
+    ]
+    base_settings["ai"] = {"provider": "openai", "base_url": "https://llm.example.net/v1"}
+    base_settings["notify"] = {"methods": ["email"], "email": "me@example.org"}
+    assert secret_destinations(parse_settings(base_settings)) == [
+        "AI key -> llm.example.net",
+        "SMTP password -> smtp.example.org",
+    ]

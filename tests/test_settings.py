@@ -197,3 +197,16 @@ def test_example_settings_parse_once_the_city_is_set() -> None:
     assert [w.name for w in parse_settings(tomllib.loads(uncommented)).watches][-1] == (
         "standing desk"
     )
+
+
+def test_shipped_settings_hold_no_location() -> None:
+    # Committed for others to copy, so filling one in place would publish
+    # the author's area.
+    root = Path(__file__).parents[1]
+    for path in (
+        root / "src/deal_hunter/example-settings.toml",
+        root / "deploy/kubernetes/example/deal-hunter.toml",
+    ):
+        data = tomllib.loads(path.read_text())
+        assert data["location"]["search_city"] == "CHANGE_ME", path
+        assert "seller_locations" not in data["location"], path
