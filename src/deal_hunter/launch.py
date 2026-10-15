@@ -148,7 +148,10 @@ def monitor_init(self: Any, config_files: Any, headless: Any, logger: Any) -> No
     _upstream_monitor_init(self, config_files, headless, logger)
     if SESSION is not None and SESSION.required:
         home_config = amm_home / "config.toml"  # the path upstream adds
-        self.config_files = [f for f in self.config_files if f != home_config]
+        resolved = home_config.resolve()
+        self.config_files = [
+            f for f in self.config_files if f != home_config and f.resolve() != resolved
+        ]
 
 
 def launch_browser(self: Any) -> Any:

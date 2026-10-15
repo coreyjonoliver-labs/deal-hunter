@@ -223,7 +223,15 @@ def parse_settings(data: dict[str, Any]) -> Settings:
             if value:
                 if key == "smtp_server" and not _HOST_RE.match(value):
                     raise SettingsError("notify.smtp_server must be a hostname.")
+                if key == "smtp_username" and value.count("@") > 1:
+                    raise SettingsError("notify.smtp_username can't contain more than one '@'.")
                 fields[key] = value
+        # Without smtp_server, upstream takes the host from the sender's domain.
+        sender = str(fields.get("smtp_username") or email)
+        if "smtp_server" not in fields and "@" not in sender:
+            raise SettingsError(
+                "notify.smtp_server is required when smtp_username isn't an address."
+            )
         if "smtp_port" in notify:
             fields["smtp_port"] = _int(notify, "smtp_port", "notify", default=587, lo=1, hi=65535)
 
