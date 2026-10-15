@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from nuc_hunter.settings import SettingsError, load_settings, parse_settings
+from deal_hunter.settings import SettingsError, load_settings, parse_settings
 
 
 def test_defaults_fill_in(base_settings: dict[str, Any]) -> None:
@@ -28,13 +28,13 @@ def test_session_settings(base_settings: dict[str, Any]) -> None:
 
 
 def test_example_settings_require_a_real_city() -> None:
-    example = Path(__file__).parents[1] / "src/nuc_hunter/example-settings.toml"
+    example = Path(__file__).parents[1] / "src/deal_hunter/example-settings.toml"
     with pytest.raises(SettingsError, match="search_city"):
         load_settings(example)
 
 
 def test_missing_file_points_at_init(tmp_path: Path) -> None:
-    with pytest.raises(SettingsError, match="nuc-hunter init"):
+    with pytest.raises(SettingsError, match="deal-hunter init"):
         load_settings(tmp_path / "nope.toml")
 
 

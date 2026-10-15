@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from nuc_hunter import session
+from deal_hunter import session
 
 
 @pytest.fixture(autouse=True)
@@ -14,7 +14,7 @@ def no_real_home(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempP
     """Keep tests away from the real ~/.ai-marketplace-monitor and Time Machine."""
     monkeypatch.setattr(session, "AIMM_HOME", tmp_path_factory.mktemp("aimm-home"))
     monkeypatch.setattr(session, "exclude_from_backups", lambda path: True)
-    for name in ("NUC_HUNTER_AWAITING_SEED", "NUC_HUNTER_RESTARTS"):
+    for name in ("DEAL_HUNTER_AWAITING_SEED", "DEAL_HUNTER_RESTARTS"):
         monkeypatch.delenv(name, raising=False)
 
 

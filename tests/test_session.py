@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 from fakes import LOGIN_COOKIE, FakeBrowserPage, FakeContext
 
-from nuc_hunter import session
+from deal_hunter import session
 
 REAL_EXCLUDE = session.exclude_from_backups  # conftest stubs it out for every test
 
@@ -198,7 +198,7 @@ def test_load_round_trips(tmp_path: Path) -> None:
 def test_load_rejects_junk_without_echoing_it(tmp_path: Path, text: str) -> None:
     path = tmp_path / "s.json"
     path.write_text(text)
-    with pytest.raises(session.SessionError, match="nuc-hunter login") as e:
+    with pytest.raises(session.SessionError, match="deal-hunter login") as e:
         session.load(path)
     assert "SECRET" not in str(e.value)
 

@@ -14,9 +14,9 @@ import pytest
 from ai_marketplace_monitor import facebook, marketplace, monitor, utils
 from fakes import LOGIN_COOKIE, FakeBrowser, FakeContext
 
-from nuc_hunter import events, launch, profile
-from nuc_hunter import session as fb_session
-from nuc_hunter.session import Session, SessionError
+from deal_hunter import events, launch, profile
+from deal_hunter import session as fb_session
+from deal_hunter.session import Session, SessionError
 
 TRIMMER = (
     "Toro 60V Revolution String Trimmer (battery not included)  "
@@ -390,7 +390,7 @@ def test_login_reuses_a_valid_session(
         market.login()
     assert upstream == []  # no login form, no 60-second wait
     assert market.visited == [fb_session.MARKETPLACE_URL]
-    assert market.nuc_logged_in
+    assert market.hunter_logged_in
     assert saved.stat().st_mtime_ns >= before
     assert "Using the saved Facebook session" in caplog.text
     assert LOGIN_COOKIE["value"] not in caplog.text
@@ -407,7 +407,7 @@ def test_login_falls_back_when_the_session_expired(
     # The fresh login is saved for next time.
     state = fb_session.load(saved)
     assert state is not None and state["cookies"] == [LOGIN_COOKIE]
-    assert market.nuc_logged_in
+    assert market.hunter_logged_in
 
 
 def test_required_session_never_falls_back(
@@ -424,7 +424,7 @@ def test_required_session_missing_file(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, upstream: list[Any]
 ) -> None:
     monkeypatch.setattr(launch, "SESSION", Session(tmp_path / "none.json", required=True))
-    with pytest.raises(SessionError, match="nuc-hunter login"):
+    with pytest.raises(SessionError, match="deal-hunter login"):
         SessionMarket(FakeBrowser()).login()
     assert upstream == []
 
@@ -447,7 +447,7 @@ def test_no_session_is_plain_upstream_login(
     market = SessionMarket(FakeBrowser())
     market.login()
     assert upstream == [market]
-    assert not getattr(market, "nuc_logged_in", False)
+    assert not getattr(market, "hunter_logged_in", False)
 
 
 def test_save_failure_does_not_stop_the_monitor(
@@ -477,7 +477,7 @@ def logged_in_market(monkeypatch: pytest.MonkeyPatch, path: Path, required: bool
     monkeypatch.setattr(launch, "SESSION", Session(path, required=required))
     market = SessionMarket(FakeBrowser())
     market.login()
-    assert market.nuc_logged_in
+    assert market.hunter_logged_in
     return market
 
 

@@ -1,10 +1,10 @@
-"""`nuc-hunter web`: a read-only page with what the monitor found and how it's doing.
+"""`deal-hunter web`: a read-only page with what the monitor found and how it's doing.
 
 Everything comes from files the monitor writes in aimm's home:
 
 - ``cache.db`` (aimm's diskcache): listing details, AI ratings, who was
   notified and aimm's lifetime counters. Opened read-only.
-- ``nuc-hunter-events.jsonl`` (events.py): timestamped searches, ratings,
+- ``deal-hunter-events.jsonl`` (events.py): timestamped searches, ratings,
   token usage and problems.
 - the saved Facebook session's metadata: when it was saved and when its
   login cookie expires. Never its contents.
@@ -43,9 +43,9 @@ from string import Template
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from nuc_hunter import session as fb_session
-from nuc_hunter.events import EVENTS_NAME, read_events
-from nuc_hunter.settings import Settings
+from deal_hunter import session as fb_session
+from deal_hunter.events import events_path, read_events
+from deal_hunter.settings import Settings
 
 # $ per million tokens (input, output), by model-name prefix. Cache reads are
 # billed at a tenth of input, cache writes at 1.25x.
@@ -129,7 +129,7 @@ class Snapshot:
 # first import runs with HOME pointing at a scratch directory. Kept for the
 # life of the process, since aimm holds that cache open. session.AIMM_HOME is
 # already bound to the real home by this module's top-level import of
-# nuc_hunter.session; keep that import at module level.
+# deal_hunter.session; keep that import at module level.
 _SCRATCH_HOME: tempfile.TemporaryDirectory[str] | None = None
 
 
@@ -137,20 +137,20 @@ def import_aimm_without_cache() -> None:
     global _SCRATCH_HOME
     if "ai_marketplace_monitor.utils" in sys.modules:
         return
-    scratch = tempfile.TemporaryDirectory(prefix="nuc-hunter-web-")
+    scratch = tempfile.TemporaryDirectory(prefix="deal-hunter-web-")
     saved = os.environ.get("HOME")
     os.environ["HOME"] = scratch.name
     try:
         import ai_marketplace_monitor.listing  # noqa: F401
 
-        import nuc_hunter.filters  # noqa: F401 — imports the rest of aimm
+        import deal_hunter.filters  # noqa: F401 — imports the rest of aimm
     except BaseException:
         # Drop the half-imported modules, or the next call would skip the
         # workaround and a later import would open the real cache.
         for name in [m for m in sys.modules if m.startswith("ai_marketplace_monitor")]:
             del sys.modules[name]
-        sys.modules.pop("nuc_hunter.filters", None)
-        sys.modules.pop("nuc_hunter.launch", None)
+        sys.modules.pop("deal_hunter.filters", None)
+        sys.modules.pop("deal_hunter.launch", None)
         scratch.cleanup()
         raise
     finally:
@@ -265,8 +265,8 @@ def collect(settings: Settings, home: Path, now: float | None = None) -> Snapsho
         elif kind == "counters" and len(key) == 3 and isinstance(value, int):
             counters[str(key[1])] += value
 
-    from nuc_hunter.filters import drop_reasons, parse_price
-    from nuc_hunter.render import build_config
+    from deal_hunter.filters import drop_reasons, parse_price
+    from deal_hunter.render import build_config
 
     config = build_config(settings)
     items = config["item"]
@@ -308,12 +308,11 @@ def collect(settings: Settings, home: Path, now: float | None = None) -> Snapsho
         if per_item and all(per_item):
             result.dropped = per_item[0]
         results.append(result)
-    events_path = home / EVENTS_NAME
     cache_db = home / "cache.db"
     return Snapshot(
         results=results,
         counters=dict(counters),
-        events=list(read_events(events_path)),
+        events=list(read_events(events_path(home))),
         now=now,
         cache_bytes=cache_db.stat().st_size if cache_db.is_file() else 0,
         errors=errors,
@@ -366,7 +365,7 @@ def status(snap: Snapshot, settings: Settings) -> Status:
         return Status(
             "No activity yet",
             "idle",
-            "Activity is recorded from the next `nuc-hunter run`.",
+            "Activity is recorded from the next `deal-hunter run`.",
         )
     last_start = max(starts, default=0.0)
     last_search = max(searches, default=0.0)
@@ -464,7 +463,7 @@ def summary(snap: Snapshot, settings: Settings) -> dict[str, Any]:
         "counters": snap.counters,
         "session": session_info(settings, snap.now),
         "app": {
-            "nuc_hunter": _version("nuc-hunter"),
+            "deal_hunter": _version("deal-hunter"),
             "aimm": _version("ai-marketplace-monitor"),
             "search_city": settings.location.search_city,
             "radius": settings.location.radius,
@@ -495,14 +494,14 @@ def session_info(settings: Settings, now: float) -> dict[str, Any]:
         if settings.session_file.exists():
             info["problem"] = "Saved; its details show up once `run` next logs in."
         else:
-            info["problem"] = "No session details yet. Run `nuc-hunter login` if you haven't."
+            info["problem"] = "No session details yet. Run `deal-hunter login` if you haven't."
         return info
     for key in ("saved_at", "expires"):
         value = meta.get(key)
         if isinstance(value, (int, float)) and 0 < value < MAX_TS:
             info[key] = value
     if info["expires"] is not None and info["expires"] < now:
-        info["problem"] = "The login cookie has expired. Run `nuc-hunter login`."
+        info["problem"] = "The login cookie has expired. Run `deal-hunter login`."
     return info
 
 
@@ -735,7 +734,7 @@ def side_html(data: dict[str, Any], now: float) -> str:
         ("Notify at rating", f"{app['rating']}+ via {e(', '.join(app['notify']) or 'nothing')}"),
         ("Searches", e(", ".join(app["items"]))),
         ("Cache", e(size(app["cache_bytes"]))),
-        ("Versions", f"nuc-hunter {e(app['nuc_hunter'])} · aimm {e(app['aimm'])}"),
+        ("Versions", f"deal-hunter {e(app['deal_hunter'])} · aimm {e(app['aimm'])}"),
     ]
     problems = data["problems"]["recent"]
     if problems:
@@ -763,7 +762,7 @@ def side_html(data: dict[str, Any], now: float) -> str:
 
 @functools.cache
 def page_template() -> Template:
-    return Template(resources.files("nuc_hunter").joinpath("dashboard.html").read_text())
+    return Template(resources.files("deal_hunter").joinpath("dashboard.html").read_text())
 
 
 @functools.cache
@@ -831,10 +830,10 @@ class SnapshotCache:
         self.at = 0.0
 
     def _key(self) -> tuple[Any, ...]:
-        paths = ("cache.db", "cache.db-wal", EVENTS_NAME)
+        paths = [self.home / "cache.db", self.home / "cache.db-wal", events_path(self.home)]
         meta = fb_session.meta_path(self.settings.session_file)
         stamps: list[tuple[int, int] | None] = []
-        for path in [self.home / p for p in paths] + [meta]:
+        for path in [*paths, meta]:
             try:
                 st = path.stat()
                 stamps.append((st.st_mtime_ns, st.st_size))
@@ -887,7 +886,7 @@ def make_handler(settings: Settings, home: Path, hosts: set[str]) -> type[BaseHT
         protocol_version = "HTTP/1.1"
 
         def version_string(self) -> str:
-            return "nuc-hunter"
+            return "deal-hunter"
 
         def do_HEAD(self) -> None:  # noqa: N802
             self.do_GET(head=True)
@@ -962,7 +961,7 @@ def serve(
     hosts = allowed_hosts(host, extra_hosts)
     server = BoundedServer((host, port), make_handler(settings, home, hosts))
     shown = f"[{host}]" if ":" in host else host
-    print(f"nuc-hunter dashboard on http://{shown}:{server.server_address[1]}/", flush=True)
+    print(f"deal-hunter dashboard on http://{shown}:{server.server_address[1]}/", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

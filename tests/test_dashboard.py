@@ -1,4 +1,4 @@
-"""`nuc-hunter web`: joining aimm's cache, metrics, the page and the server."""
+"""`deal-hunter web`: joining aimm's cache, metrics, the page and the server."""
 
 from __future__ import annotations
 
@@ -17,9 +17,9 @@ from ai_marketplace_monitor.listing import Listing
 from diskcache import Cache
 from fakes import LOGIN_COOKIE, FakeContext
 
-from nuc_hunter import dashboard, session
-from nuc_hunter.events import EVENTS_NAME
-from nuc_hunter.settings import Settings, parse_settings
+from deal_hunter import dashboard, session
+from deal_hunter.events import EVENTS_NAME
+from deal_hunter.settings import Settings, parse_settings
 
 NOW = 1_800_000_000.0
 FRESH_IMAGE = f"https://scontent.fcid1-1.fna.fbcdn.net/v/x.jpg?oe={int(NOW + 3600):X}&oh=1"
@@ -243,7 +243,7 @@ def test_server_page(server: int) -> None:
     assert "script-src" not in resp.headers["Content-Security-Policy"]  # default-src 'none'
     assert resp.headers["Content-Security-Policy"].startswith("default-src 'none'")
     assert resp.headers["X-Frame-Options"] == "DENY"
-    assert resp.headers["Server"] == "nuc-hunter"
+    assert resp.headers["Server"] == "deal-hunter"
     assert b"Beelink SER5" in body and b"<script" not in body
 
 
@@ -282,7 +282,7 @@ def test_junk_timestamps_render(settings: Settings, home: Path) -> None:
     session.save(FakeContext([LOGIN_COOKIE]), settings.session_file)
     meta = session.meta_path(settings.session_file)
     meta.write_text(json.dumps({"saved_at": 1e300, "expires": -5}))
-    assert "nuc-hunter" in dashboard.render_page(dashboard.collect(settings, home, NOW), settings)
+    assert "deal-hunter" in dashboard.render_page(dashboard.collect(settings, home, NOW), settings)
     assert dashboard.when(1e300) == "—" and dashboard.ago(1e300, NOW) == "never"
 
 
@@ -406,7 +406,7 @@ def test_importing_aimm_leaves_the_monitors_home_alone(tmp_path: Path) -> None:
     # aimm opens ~/.ai-marketplace-monitor/cache.db read-write when imported;
     # `web` must not, or it writes to the monitor's cache (and fails read-only).
     code = (
-        "import os, sys; from nuc_hunter import dashboard, session; "
+        "import os, sys; from deal_hunter import dashboard, session; "
         "dashboard.import_aimm_without_cache(); "
         "assert 'ai_marketplace_monitor.utils' in sys.modules; "
         "assert os.environ['HOME'] == sys.argv[1]; "
@@ -422,10 +422,10 @@ def test_importing_aimm_leaves_the_monitors_home_alone(tmp_path: Path) -> None:
 
 def test_failed_aimm_import_restores_home(tmp_path: Path) -> None:
     code = (
-        "import builtins, os, sys; from nuc_hunter import dashboard; "
+        "import builtins, os, sys; from deal_hunter import dashboard; "
         "real = builtins.__import__\n"
         "def broken(name, *a, **k):\n"
-        "    if name.startswith('nuc_hunter.filters'): raise ImportError('boom')\n"
+        "    if name.startswith('deal_hunter.filters'): raise ImportError('boom')\n"
         "    return real(name, *a, **k)\n"
         "builtins.__import__ = broken\n"
         "try:\n"

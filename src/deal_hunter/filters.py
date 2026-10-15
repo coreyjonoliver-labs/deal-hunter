@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from nuc_hunter.launch import is_substring_without_urls as is_substring
+from deal_hunter.launch import is_substring_without_urls as is_substring
 
 _PRICE = re.compile(r"\$\s*([\d,]+)")
 

@@ -11,7 +11,7 @@
    an error (search pages), so a supervisor can restart it.
 3. The Facebook login is reused. aimm starts a fresh browser with no cookies
    on every start, then types a username/password or waits 60 seconds for you
-   to log in. With a session saved by ``nuc-hunter login``, the browser starts
+   to log in. With a session saved by ``deal-hunter login``, the browser starts
    with its cookies, and the login form and wait are skipped while it's still
    logged in. The session is saved again after each login and search, so
    Facebook's refreshed cookies are kept. If Facebook logs the monitor out
@@ -22,11 +22,11 @@
    Facebook page could read the API keys and the saved session. The browser
    now starts with Chromium's sandbox (facebook.browser_sandbox) and only
    locale/display/path variables (no HTTP(S)_PROXY or custom CA settings
-   either). nuc-hunter also sets the process umask to 077 and tightens
+   either). deal-hunter also sets the process umask to 077 and tightens
    ~/.ai-marketplace-monitor, so everything aimm writes (its log, cache and
    debug_*.html page dumps, which show a logged-in page) is owner-only.
 
-``nuc-hunter run`` starts aimm through ``main`` in the same process, which
+``deal-hunter run`` starts aimm through ``main`` in the same process, which
 applies all four. aimm is pinned, and tests/test_launch.py checks the patch points
 still exist.
 
@@ -49,9 +49,9 @@ from ai_marketplace_monitor.facebook import FacebookMarketplace
 from ai_marketplace_monitor.utils import aimm_event, is_substring
 from playwright.sync_api import Error as PlaywrightError
 
-from nuc_hunter import events
-from nuc_hunter import session as fb_session
-from nuc_hunter.session import Session, SessionError
+from deal_hunter import events
+from deal_hunter import session as fb_session
+from deal_hunter.session import Session, SessionError
 
 # Only links with a scheme or www.: bare "domain/path" patterns also match spec
 # text like "NUC8i5.BEH/16GB" or "3.5/4GHz" and would hide real listings.
@@ -168,12 +168,12 @@ def launch_browser(self: Any) -> Any:
 def login_with_session(self: Any) -> None:
     """FacebookMarketplace.login that reuses the saved session while it's valid."""
     session = SESSION
-    self.nuc_logged_in = False
+    self.hunter_logged_in = False
     if session is not None and fb_session.load(session.path) is not None:
         self.page = self.create_page(swap_proxy=True)
         self.goto_url(fb_session.MARKETPLACE_URL)
         if fb_session.logged_in(self.page):
-            self.nuc_logged_in = True
+            self.hunter_logged_in = True
             _save(self, session)
             if self.logger:
                 self.logger.info("[Login] Using the saved Facebook session.")
@@ -181,16 +181,16 @@ def login_with_session(self: Any) -> None:
         if self.logger:
             self.logger.warning(
                 "[Login] The saved Facebook session has expired. "
-                "Run `nuc-hunter login` to save a new one."
+                "Run `deal-hunter login` to save a new one."
             )
     if session is not None and session.required:
         raise SessionError(
             f"no valid Facebook session in {session.path}, and facebook.require_session "
-            "is set. Run `nuc-hunter login` to save one."
+            "is set. Run `deal-hunter login` to save one."
         )
     _upstream_login(self)
     if session is not None and self.page is not None and fb_session.logged_in(self.page):
-        self.nuc_logged_in = True
+        self.hunter_logged_in = True
         _save(self, session)
 
 
@@ -212,20 +212,20 @@ def search_with_session(self: Any, item_config: Any) -> Iterator[Any]:
 
 def _check_login(market: Any) -> None:
     session = SESSION
-    if session is None or market.page is None or not getattr(market, "nuc_logged_in", False):
+    if session is None or market.page is None or not getattr(market, "hunter_logged_in", False):
         return
     if fb_session.logged_in(market.page):
         _save(market, session)
         return
-    market.nuc_logged_in = False
+    market.hunter_logged_in = False
     if session.required:
         raise SessionError(
-            "Facebook logged the monitor out. Run `nuc-hunter login` to save a new session."
+            "Facebook logged the monitor out. Run `deal-hunter login` to save a new session."
         )
     if market.logger:
         market.logger.warning(
             "[Login] Facebook logged the monitor out; searching without a login until "
-            "the next start. Run `nuc-hunter login` to save a new session."
+            "the next start. Run `deal-hunter login` to save a new session."
         )
 
 
@@ -237,8 +237,8 @@ def _save(market: Any, session: Session) -> None:
         if market.logger:
             market.logger.warning(f"[Login] Couldn't save the Facebook session: {reason}")
         return
-    if not excluded and not getattr(market, "nuc_backup_warned", False):
-        market.nuc_backup_warned = True
+    if not excluded and not getattr(market, "hunter_backup_warned", False):
+        market.hunter_backup_warned = True
         if market.logger:
             market.logger.warning(
                 f"[Login] Couldn't exclude {session.path} from Time Machine backups."
@@ -254,8 +254,10 @@ def main(args: list[str], session: Session | None = None, sandbox: bool = True) 
     SESSION, SANDBOX = session, sandbox
     os.umask(0o077)
     fb_session.private_home()  # files aimm already created, before the umask
-    # For `nuc-hunter web`: aimm logs to the "monitor" logger.
-    events.attach(logging.getLogger("monitor"), fb_session.AIMM_HOME / events.EVENTS_NAME)
+    # For `deal-hunter web`: aimm logs to the "monitor" logger.
+    events.attach(
+        logging.getLogger("monitor"), events.events_path(fb_session.AIMM_HOME, migrate=True)
+    )
     setattr(facebook, "is_substring", is_substring_without_urls)  # noqa: B010 — not re-exported
     marketplace.Marketplace.goto_url = goto_url_with_timeout  # type: ignore[method-assign]
     marketplace.Marketplace.create_page = create_page_with_session  # type: ignore[method-assign]

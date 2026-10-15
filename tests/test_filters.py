@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from ai_marketplace_monitor.utils import is_substring
 
-from nuc_hunter import profile
+from deal_hunter import profile
 
 KEEP = [
     "Intel NUC8i5BEH 16GB RAM 256GB SSD",

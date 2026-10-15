@@ -1,10 +1,10 @@
-# nuc-hunter in a container: `run` (the monitor) and `web` (the dashboard)
+# deal-hunter in a container: `run` (the monitor) and `web` (the dashboard)
 # from one image. Settings, secrets and state all come from outside it; see
 # "Run in a container" in README.md for the mounts and environment.
 #
 # Only Playwright's headless Chromium is installed: in a container nothing
 # can show a login window, so the monitor runs with
-# facebook.require_session = true and a session saved by `nuc-hunter login`
+# facebook.require_session = true and a session saved by `deal-hunter login`
 # on a desktop.
 
 FROM ghcr.io/astral-sh/uv:0.11.26@sha256:3d868e555f8f1dbc324afa005066cd11e1053fc4743b9808ca8025283e65efa5 AS uv
@@ -48,14 +48,14 @@ RUN uv sync --locked --no-dev --no-editable \
 # page dumps). The image itself can be mounted read-only.
 # The state directories exist in the image so a new Docker volume mounted on
 # them starts out owned by this user.
-RUN useradd --uid 1000 --user-group --home-dir /home/nuc --create-home nuc \
- && mkdir -p /home/nuc/.ai-marketplace-monitor /session /work \
- && chown nuc:nuc /home/nuc/.ai-marketplace-monitor /session /work \
- && chmod 0700 /home/nuc/.ai-marketplace-monitor /session
+RUN useradd --uid 1000 --user-group --home-dir /home/hunter --create-home hunter \
+ && mkdir -p /home/hunter/.ai-marketplace-monitor /session /work \
+ && chown hunter:hunter /home/hunter/.ai-marketplace-monitor /session /work \
+ && chmod 0700 /home/hunter/.ai-marketplace-monitor /session
 USER 1000:1000
-ENV HOME=/home/nuc
+ENV HOME=/home/hunter
 WORKDIR /work
 
 EXPOSE 8740
-ENTRYPOINT ["nuc-hunter"]
+ENTRYPOINT ["deal-hunter"]
 CMD ["--help"]

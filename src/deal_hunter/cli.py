@@ -1,4 +1,4 @@
-"""nuc-hunter command line: init, render, check, login, run, web."""
+"""deal-hunter command line: init, render, check, login, run, web."""
 
 from __future__ import annotations
 
@@ -10,9 +10,9 @@ import time
 from importlib import resources
 from pathlib import Path
 
-from nuc_hunter.files import write_private
-from nuc_hunter.render import build_config, render, required_env
-from nuc_hunter.session import (
+from deal_hunter.files import write_private
+from deal_hunter.render import build_config, render, required_env
+from deal_hunter.session import (
     LOGIN_TIMEOUT_S,
     Session,
     SessionError,
@@ -21,17 +21,19 @@ from nuc_hunter.session import (
     first_line,
     interactive_login,
 )
-from nuc_hunter.session import load as load_session
-from nuc_hunter.settings import Settings, SettingsError, load_settings
+from deal_hunter.session import load as load_session
+from deal_hunter.settings import Settings, SettingsError, load_settings
 
-DEFAULT_SETTINGS = Path("nuc-hunter.toml")
+DEFAULT_SETTINGS = Path("deal-hunter.toml")
+# The settings file's name before the project was renamed.
+LEGACY_SETTINGS = Path("nuc-hunter.toml")
 DEFAULT_OUTPUT = Path("build/aimm-config.toml")
 AIMM_HOME_CONFIG = Path.home() / ".ai-marketplace-monitor" / "config.toml"
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="nuc-hunter",
+        prog="deal-hunter",
         description="NUC / mini-PC tuned front-end for ai-marketplace-monitor.",
     )
     parser.add_argument(
@@ -39,7 +41,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("init", help="create nuc-hunter.toml from the example")
+    sub.add_parser("init", help="create deal-hunter.toml from the example")
 
     p_render = sub.add_parser("render", help="write the ai-marketplace-monitor config")
     p_render.add_argument("-o", "--output", type=Path, default=DEFAULT_OUTPUT)
@@ -95,6 +97,14 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     args = parser.parse_args(argv)
+    if (
+        args.command != "init"
+        and args.settings == DEFAULT_SETTINGS
+        and not DEFAULT_SETTINGS.exists()
+        and LEGACY_SETTINGS.is_file()
+    ):
+        print(f"Using {LEGACY_SETTINGS}; rename it to {DEFAULT_SETTINGS}.", file=sys.stderr)
+        args.settings = LEGACY_SETTINGS
     # In a container this process is PID 1, which ignores SIGTERM unless it
     # has a handler; stop the way Ctrl+C does. (main runs on the main thread.)
     signal.signal(signal.SIGTERM, _interrupt)
@@ -119,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
             restart_s=args.restart_after,
         )
     except (SettingsError, SessionError) as e:
-        print(f"nuc-hunter: {e}", file=sys.stderr)
+        print(f"deal-hunter: {e}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
         return 130
@@ -133,9 +143,9 @@ def _init(path: Path) -> int:
     if path.exists():
         print(f"{path} already exists; leaving it alone.", file=sys.stderr)
         return 1
-    example = resources.files("nuc_hunter").joinpath("example-settings.toml").read_text()
+    example = resources.files("deal_hunter").joinpath("example-settings.toml").read_text()
     write_private(path, example)
-    print(f"Wrote {path}. Set location.search_city, then run `nuc-hunter run`.")
+    print(f"Wrote {path}. Set location.search_city, then run `deal-hunter run`.")
     return 0
 
 
@@ -149,7 +159,7 @@ def _render(settings_path: Path, output: Path) -> int:
 
 
 def _check(settings_path: Path, title: str, description: str, price: int | None) -> int:
-    from nuc_hunter.filters import drop_reasons
+    from deal_hunter.filters import drop_reasons
 
     settings = load_settings(settings_path)
     text = f"{title}  {description}"
@@ -171,7 +181,7 @@ def _login(settings_path: Path) -> int:
     )
     interactive_login(settings.session_file)
     print(f"Saved the session to {settings.session_file}. Anyone with this file is logged in")
-    print("as you: don't commit or share it. `nuc-hunter run` now uses it.")
+    print("as you: don't commit or share it. `deal-hunter run` now uses it.")
     if not exclude_from_backups(settings.session_file):
         print(
             f"warning: couldn't exclude {settings.session_file} from Time Machine backups.",
@@ -181,8 +191,8 @@ def _login(settings_path: Path) -> int:
 
 
 def _web(settings_path: Path, host: str, port: int, allow_hosts: list[str]) -> int:
-    from nuc_hunter.dashboard import LOOPBACK, serve
-    from nuc_hunter.session import AIMM_HOME
+    from deal_hunter.dashboard import LOOPBACK, serve
+    from deal_hunter.session import AIMM_HOME
 
     settings = load_settings(settings_path)
     if host not in LOOPBACK:
@@ -196,15 +206,16 @@ def _web(settings_path: Path, host: str, port: int, allow_hosts: list[str]) -> i
         serve(settings, AIMM_HOME, host, port, allow_hosts)
     except OSError as e:
         print(
-            f"nuc-hunter: can't listen on {host}:{port}: {e.strerror}. Try --port.", file=sys.stderr
+            f"deal-hunter: can't listen on {host}:{port}: {e.strerror}. Try --port.",
+            file=sys.stderr,
         )
         return 1
     return 0
 
 
 # State carried across a restart (os.execv keeps the environment).
-_AWAIT_SEED = "NUC_HUNTER_AWAITING_SEED"  # the session failed; wait for a new seed
-_RESTARTS = "NUC_HUNTER_RESTARTS"  # consecutive failed runs, for the backoff
+_AWAIT_SEED = "DEAL_HUNTER_AWAITING_SEED"  # the session failed; wait for a new seed
+_RESTARTS = "DEAL_HUNTER_RESTARTS"  # consecutive failed runs, for the backoff
 MAX_RESTART_DELAY_S = 6 * 3600
 # A run this long counts as having worked: the backoff starts over.
 HEALTHY_RUN_S = 3600
@@ -247,7 +258,7 @@ def _run(
             return _start(settings_path, settings, output, aimm_args, webui=webui)
         # The session failed and the seed hasn't changed: don't load Facebook
         # again with dead cookies, just keep waiting for a new seed.
-        print(f"nuc-hunter: still waiting for a new session in {seed}.", file=sys.stderr)
+        print(f"deal-hunter: still waiting for a new session in {seed}.", file=sys.stderr)
         time.sleep(wait_s)
         os.environ[_AWAIT_SEED] = "1"
     except SessionError as e:
@@ -291,13 +302,13 @@ def _restart() -> None:
 
 def _record(message: str) -> None:
     """Print a problem and record it where `web` shows recent problems."""
-    from nuc_hunter.events import EVENTS_NAME, EventRecorder
-    from nuc_hunter.session import AIMM_HOME
+    from deal_hunter.events import EventRecorder, events_path
+    from deal_hunter.session import AIMM_HOME
 
-    print(f"nuc-hunter: {message}", file=sys.stderr, flush=True)
+    print(f"deal-hunter: {message}", file=sys.stderr, flush=True)
     try:
         AIMM_HOME.mkdir(mode=0o700, exist_ok=True)
-        recorder = EventRecorder(AIMM_HOME / EVENTS_NAME)
+        recorder = EventRecorder(events_path(AIMM_HOME, migrate=True))
         recorder.write({"ts": time.time(), "kind": "error", "message": recorder.redact(message)})
     except OSError:
         pass
@@ -318,7 +329,7 @@ def _start(
         if session.required:
             raise SessionError(
                 f"{session.path} doesn't exist and facebook.require_session is set. "
-                "Run `nuc-hunter login` to create it."
+                "Run `deal-hunter login` to create it."
             )
     _render(settings_path, output)
 
@@ -339,8 +350,8 @@ def _start(
     argv += aimm_args
     print("Starting: ai-marketplace-monitor", " ".join(argv), flush=True)
     # In this process, not `python -m`: that would put the current directory
-    # first on sys.path. launch.main applies nuc-hunter's fixes to aimm.
-    from nuc_hunter.launch import main as run_aimm
+    # first on sys.path. launch.main applies deal-hunter's fixes to aimm.
+    from deal_hunter.launch import main as run_aimm
 
     run_aimm(argv, session, settings.browser_sandbox)
     return 0  # pragma: no cover — aimm exits via SystemExit

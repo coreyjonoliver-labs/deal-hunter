@@ -1,4 +1,4 @@
-# nuc-hunter
+# deal-hunter
 
 Watches Facebook Marketplace near you for NUC-class mini PCs (Intel/ASUS NUC,
 Beelink, Minisforum, GMKtec, Geekom and similar) and sends you only the good ones.
@@ -6,7 +6,7 @@ Beelink, Minisforum, GMKtec, Geekom and similar) and sends you only the good one
 It's a thin layer over
 [ai-marketplace-monitor](https://github.com/BoPeng/ai-marketplace-monitor)
 (pinned to 0.10.2). The monitor does the browsing, de-duplication and
-notifications. nuc-hunter turns a short settings file into a NUC-tuned config
+notifications. deal-hunter turns a short settings file into a NUC-tuned config
 for it:
 
 - **Local pickup only**: searches use Facebook's local-pickup filter within your
@@ -32,10 +32,10 @@ for it:
 ```sh
 uv sync --locked
 uv run playwright install chromium
-uv run nuc-hunter init          # creates nuc-hunter.toml (gitignored)
+uv run deal-hunter init          # creates deal-hunter.toml (gitignored)
 ```
 
-Edit `nuc-hunter.toml`:
+Edit `deal-hunter.toml`:
 
 1. **`location.search_city`**: open Marketplace in a browser, search for
    anything near you, and copy `XXX` from
@@ -56,7 +56,7 @@ Edit `nuc-hunter.toml`:
 | `["telegram"]` | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
 | `["pushbullet"]` | `PUSHBULLET_TOKEN` |
 | `["email"]` (+ `notify.email`) | `SMTP_PASSWORD` |
-| Facebook login (optional; `nuc-hunter login` is better) | `FACEBOOK_USERNAME`, `FACEBOOK_PASSWORD` |
+| Facebook login (optional; `deal-hunter login` is better) | `FACEBOOK_USERNAME`, `FACEBOOK_PASSWORD` |
 
 For email, set `notify.smtp_server` / `smtp_username` / `smtp_port` unless your
 provider uses `smtp.<your domain>` on port 587 (Gmail does; use an app password).
@@ -69,18 +69,18 @@ the topic can read it, so treat it like a password.
 ## Run
 
 ```sh
-uv run nuc-hunter run                 # renders build/aimm-config.toml, starts the monitor
-uv run nuc-hunter run -- --verbose    # anything after -- is passed to ai-marketplace-monitor
+uv run deal-hunter run                 # renders build/aimm-config.toml, starts the monitor
+uv run deal-hunter run -- --verbose    # anything after -- is passed to ai-marketplace-monitor
 ```
 
 ### Log in to Facebook once
 
 ```sh
-uv run nuc-hunter login
+uv run deal-hunter login
 ```
 
 A Chrome window opens. Log in, including any 2FA or security check (you have
-5 minutes). nuc-hunter saves the browser's cookies to
+5 minutes). deal-hunter saves the browser's cookies to
 `~/.ai-marketplace-monitor/facebook-session.json` (owner-only; change it with
 `facebook.session_file`), and every `run` starts already logged in: no login
 form, no 60-second wait. The session is saved again after each login and
@@ -92,7 +92,7 @@ sellers in your name, Meta Pay, and anything linked in Accounts Center.
 
 - Use a **dedicated Facebook account** for the monitor if you can, not your
   personal one.
-- Log in only to Facebook in that window. nuc-hunter keeps only Facebook's
+- Log in only to Facebook in that window. deal-hunter keeps only Facebook's
   cookies, but there's no reason to sign in to anything else there.
 - Don't commit, share or back it up anywhere you wouldn't put your password.
   On a Mac, every save excludes it from Time Machine; check other backup or
@@ -105,7 +105,7 @@ sellers in your name, Meta Pay, and anything linked in Accounts Center.
 
 When the saved session expires, `run` logs a warning and falls back to the old
 behaviour: a Chrome window opens and you have 60 seconds to log in (that login
-is saved too). Run `nuc-hunter login` again to replace it. On a machine with no
+is saved too). Run `deal-hunter login` again to replace it. On a machine with no
 one to log in, set `facebook.require_session = true`: the monitor runs
 headless, and exits with an error instead of waiting when the session is
 missing or expired, or when Facebook logs it out mid-run.
@@ -118,7 +118,7 @@ anonymous sessions sooner.
 ### See results and status
 
 ```sh
-uv run nuc-hunter web          # http://127.0.0.1:8740/
+uv run deal-hunter web          # http://127.0.0.1:8740/
 ```
 
 A read-only page, refreshed every 5 minutes, with:
@@ -142,7 +142,7 @@ A read-only page, refreshed every 5 minutes, with:
 `web` runs separately from `run`, and only reads the monitor's files, so it
 can stay up while the monitor restarts.
 
-Activity, AI usage and status come from `nuc-hunter-events.jsonl`, which
+Activity, AI usage and status come from `deal-hunter-events.jsonl`, which
 `run` writes next to aimm's cache (aimm's own log has no timestamps), so
 they start with the first run after updating. Results and counters come from
 aimm's cache and include earlier runs.
@@ -170,7 +170,7 @@ Host for probes.
 ### Run in a container
 
 The `Dockerfile` builds one image for both `run` and `web` (CI publishes it to
-`ghcr.io/<owner>/nuc-hunter:<version>` with signed build provenance). The tag
+`ghcr.io/<owner>/deal-hunter:<version>` with signed build provenance). The tag
 is the package version and moves with every build of `main`, so pin the
 digest (`:0.1.0@sha256:…`). It runs as uid 1000, works with a read-only root
 filesystem, and keeps nothing in the image: settings, keys and state come
@@ -180,7 +180,7 @@ so it can write its volumes.
 | | `run` | `web` |
 |---|---|---|
 | Settings file (pass `-s`) | read-only | read-only |
-| `/home/nuc/.ai-marketplace-monitor`: aimm's cache, log, events (keep it) | read-write | **read-only** |
+| `/home/hunter/.ai-marketplace-monitor`: aimm's cache, log, events (keep it) | read-write | **read-only** |
 | The directory of `facebook.session_file` (keep it) | read-write | not mounted |
 | `/work`: generated config, page dumps | scratch | not needed |
 | `/tmp` | scratch | scratch |
@@ -209,7 +209,7 @@ A search and a listing page load from `www.facebook.com`,
 all on 443. Add your AI provider (`api.anthropic.com`, `api.openai.com`) and
 notifier (`ntfy.sh`, `api.pushover.net`, …).
 
-Log in on a desktop with `nuc-hunter login`, then give the container the
+Log in on a desktop with `deal-hunter login`, then give the container the
 saved file read-only (a secret mount, or a bind mount) and pass it to `run`
 with `--session-seed`. `run` copies it to `facebook.session_file` whenever its
 content changes, and otherwise keeps the copy it has been refreshing. Don't
@@ -236,19 +236,19 @@ show the mounts, not the isolation. Add a microVM runtime and an egress
 filter (above) before running it unattended.
 
 ```sh
-docker run -d --name nuc-hunter --read-only --cap-drop ALL --tmpfs /tmp \
+docker run -d --name deal-hunter --read-only --cap-drop ALL --tmpfs /tmp \
   --tmpfs /work:uid=1000,gid=1000 \
-  -v nuc-aimm:/home/nuc/.ai-marketplace-monitor -v nuc-session:/session \
+  -v hunter-aimm:/home/hunter/.ai-marketplace-monitor -v hunter-session:/session \
   -v ~/.ai-marketplace-monitor/facebook-session.json:/seed/facebook-session.json:ro \
-  -v "$PWD/nuc-hunter.toml:/config/nuc-hunter.toml:ro" -e ANTHROPIC_API_KEY \
-  ghcr.io/<owner>/nuc-hunter:0.1.0 -s /config/nuc-hunter.toml run \
+  -v "$PWD/deal-hunter.toml:/config/deal-hunter.toml:ro" -e ANTHROPIC_API_KEY \
+  ghcr.io/<owner>/deal-hunter:0.1.0 -s /config/deal-hunter.toml run \
   -o /work/build/aimm-config.toml \
   --session-seed /seed/facebook-session.json --wait-for-session 900 --restart-after 900
 
-docker run -d --name nuc-hunter-web --read-only --cap-drop ALL --tmpfs /tmp \
-  -v nuc-aimm:/home/nuc/.ai-marketplace-monitor:ro \
-  -v "$PWD/nuc-hunter.toml:/config/nuc-hunter.toml:ro" -p 127.0.0.1:8740:8740 \
-  ghcr.io/<owner>/nuc-hunter:0.1.0 -s /config/nuc-hunter.toml \
+docker run -d --name deal-hunter-web --read-only --cap-drop ALL --tmpfs /tmp \
+  -v hunter-aimm:/home/hunter/.ai-marketplace-monitor:ro \
+  -v "$PWD/deal-hunter.toml:/config/deal-hunter.toml:ro" -p 127.0.0.1:8740:8740 \
+  ghcr.io/<owner>/deal-hunter:0.1.0 -s /config/deal-hunter.toml \
   web --host 0.0.0.0 --allow-host 127.0.0.1
 ```
 
@@ -272,13 +272,13 @@ you're logged in*, rotate the API key, then save a new session.
 ### Tune the filters without hitting Facebook
 
 ```sh
-uv run nuc-hunter check "Beelink SER5 Ryzen 5 16GB 500GB" --price 180
+uv run deal-hunter check "Beelink SER5 Ryzen 5 16GB 500GB" --price 180
 # [nuc] PASS (goes to AI)
-uv run nuc-hunter check "Intel NUC for parts" "no power" --price 30
+uv run deal-hunter check "Intel NUC for parts" "no power" --price 30
 # [nuc] DROP: antikeyword "for parts"; price outside 40-400
 ```
 
-`nuc-hunter render` writes the config without starting anything, so you can
+`deal-hunter render` writes the config without starting anything, so you can
 read what's generated.
 
 ## Notes
@@ -286,7 +286,7 @@ read what's generated.
 - `run` passes `--no-webui` to ai-marketplace-monitor. Upstream's web UI has no
   login on 127.0.0.1, so any web page you visit could read its logs, which
   include your search location. A DNS-rebinding page could also edit the
-  config to send your API keys elsewhere. Only use `nuc-hunter run --webui` if
+  config to send your API keys elsewhere. Only use `deal-hunter run --webui` if
   you accept that risk.
 - Notification text includes the AI's summary and part of the listing. Both
   are partly written by the seller. The prompt tells the AI to treat listing
@@ -317,7 +317,7 @@ read what's generated.
   `run` makes `~/.ai-marketplace-monitor` and the files in it owner-only.
 - When it can't parse a results page, ai-marketplace-monitor saves it as
   `debug_<date>.html` in the current directory. With a saved session that's a
-  logged-in page (your name and id), so nuc-hunter makes it owner-only and
+  logged-in page (your name and id), so deal-hunter makes it owner-only and
   it's gitignored; delete them when you're done. They aren't cleaned up.
 - `[Search] Failed to get search results` after every search is upstream
   noise: 0.10.2 logs it unconditionally. Listings after it are processed

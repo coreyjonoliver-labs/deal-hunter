@@ -1,4 +1,4 @@
-# nuc-hunter settings. Copy to nuc-hunter.toml (`nuc-hunter init` does this).
+# deal-hunter settings. Copy to deal-hunter.toml (`deal-hunter init` does this).
 # No secrets go in this file — credentials come from environment variables.
 
 [location]
@@ -42,7 +42,7 @@ methods = []
 [facebook]
 # true = no login, headless browser. Fewer results; Facebook may block sooner.
 anonymous = false
-# Where `nuc-hunter login` saves your Facebook login for `run` to reuse.
+# Where `deal-hunter login` saves your Facebook login for `run` to reuse.
 # session_file = "~/.ai-marketplace-monitor/facebook-session.json"
 # true = headless, and exit with an error instead of waiting for a login when
 # the saved session is missing or expired. For unattended runs (a server).
