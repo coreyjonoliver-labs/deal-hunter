@@ -24,8 +24,15 @@ for it:
 - **AI judge**: the AI identifies exactly what's listed, checks it's the item
   you want (not an accessory or a "wanted" post), and checks its condition and
   completeness. It estimates a fair used price, compares it to the asking price
-  and looks for scam signals. Each notification ends with a summary like
-  `Rating 4: Uplift V2 60x30, light wear, fair ~$350 vs $220 ask — buy`.
+  and looks for scam signals. Each rating comes with a one-line plain-text
+  summary: item; condition; fair price vs asking price; buy, ask or skip. For
+  example `Rating 4: Uplift V2 60x30; light wear; fair ~$350 vs $220 ask; buy`
+  (`fair unknown` when the AI can't estimate a price). Stray markdown is
+  removed and summaries are capped at 300 characters, in notifications and on
+  the dashboard alike, including ratings stored by earlier versions. The summary
+  format is part of the prompts, so upgrading deal-hunter to a version that
+  changes them, or changing anything in a watch, re-rates a listing
+  the next time a search returns it (a small one-time AI cost).
 - **Presets**: tuned searches, keywords and prompts for one kind of item.
   `mini-pc` (Intel/ASUS NUC, Beelink, Minisforum, GMKtec, Geekom and similar)
   decodes model numbers (`NUC8i5BEH` → 8th-gen i5, `SER5` → Ryzen 5 5560U,

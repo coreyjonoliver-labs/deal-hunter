@@ -70,7 +70,8 @@ def home(tmp_path: Path) -> Path:
         put(cache, listing("1", "Beelink SER5 Ryzen 5 16GB"), 5, "Great deal")
         put(cache, listing("2", "Intel NUC11 i5", "Shelbyville, IL"), 2, "Meh")
         put(cache, listing("3", "Minisforum UM790", "Bloomington, IL"), 4, "Far away")
-        put(cache, listing("4", "Toro string trimmer"), 1, "Not a PC")
+        # Stored before summaries were cleaned at write time.
+        put(cache, listing("4", "Toro string trimmer"), 1, "**Not a PC—skip.**")
         put(cache, listing("5", "GMKtec NucBox G3", image=OLD_IMAGE), None)
         cache.set(("user-notifications", "facebook", "1", "me"), NOW)
         cache.set(("counters", "Search performed", "nuc"), 12)
@@ -92,6 +93,25 @@ def test_collect_joins_ratings_and_todays_filters(settings: Settings, home: Path
     assert by_id["4"].dropped == ["no required keyword"]
     assert by_id["5"].score is None and not by_id["5"].dropped
     assert snap.counters == {"Search performed": 12}
+
+
+def test_old_cached_comments_are_cleaned_on_display(settings: Settings, home: Path) -> None:
+    by_id = {r.id: r for r in dashboard.collect(settings, home, NOW).results}
+    assert by_id["4"].comment == "Not a PC—skip."
+    assert by_id["1"].comment == "Great deal"
+
+
+def test_all_markdown_and_overlong_stored_comments_stay_capped(
+    settings: Settings, tmp_path: Path
+) -> None:
+    home = tmp_path / "aimm2"
+    home.mkdir()
+    with Cache(str(home)) as cache:
+        put(cache, listing("1", "Beelink SER5 Ryzen 5 16GB"), 5, "****")
+        put(cache, listing("2", "Intel NUC11 i5", "Shelbyville, IL"), 3, "*" * 1000)
+    by_id = {r.id: r for r in dashboard.collect(settings, home, NOW).results}
+    assert by_id["1"].comment == "****"  # nothing else to show: kept as stored
+    assert len(by_id["2"].comment) <= 300 and by_id["2"].comment.endswith("…")
 
 
 def test_views(settings: Settings, home: Path) -> None:
@@ -259,6 +279,8 @@ def test_server_json(server: int) -> None:
     assert resp.status == 200 and resp.headers["Content-Type"] == "application/json"
     assert data["listings"]["matches"] == 1
     assert {r["id"] for r in data["results"]} == {"1", "2", "3", "4", "5"}
+    comments = {r["id"]: r["comment"] for r in data["results"]}
+    assert comments["4"] == "Not a PC—skip."
 
 
 @pytest.mark.parametrize(

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from ai_marketplace_monitor.utils import is_substring
 
 from deal_hunter import profile
+from deal_hunter.summary import clean_summary
 
 # What a mini-pc watch drops on.
 ANTIKEYWORDS = profile.MINI_PC_ANTIKEYWORDS
@@ -95,26 +98,74 @@ def test_every_keyword_parses_as_an_expression() -> None:
         expr.parseString(kw, parseAll=True)
 
 
-def test_rating_prompts_keep_aimm_parse_format() -> None:
-    assert '"Rating <1-5>: <summary>"' in profile.MINI_PC_RATING_PROMPT
-    assert '"Rating <1-5>: <summary>"' in profile.GENERIC_RATING_PROMPT
+TEMPLATE = "Rating <1-5>: <item>; <condition>; fair ~$<amount> vs $<asking> ask; <buy|ask|skip>"
+# aimm 0.10.2's rating extraction (ai.py, both backends).
+AIMM_RATING = re.compile(r".*Rating[^1-5]*([1-5])[:\s]*(.*)")
+
+
+def _example_line(prompt: str) -> str:
+    lines = [x for x in prompt.splitlines() if re.match(r"Rating [1-5]: ", x)]
+    assert len(lines) == 1, "exactly one worked example line"
+    return lines[0]
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [profile.MINI_PC_RATING_PROMPT, profile.GENERIC_RATING_PROMPT],
+    ids=["mini", "generic"],
+)
+def test_rating_prompts_require_the_plain_final_line(prompt: str) -> None:
+    assert f'"{TEMPLATE}"' in prompt
+    assert "fair unknown" in prompt
+    assert "no markdown" in prompt.lower()
+    example = _example_line(prompt)
+    # The example is what the model copies: it must parse with the intended
+    # score, leave a clean summary, and name a fair price.
+    matched = AIMM_RATING.match(example)
+    assert matched and matched.group(1) == example[7]
+    summary = matched.group(2)
+    assert clean_summary(summary) == summary
+    assert re.search(r"fair ~\$\d+ vs \$\d+ ask; (buy|ask|skip)$", summary)
+    assert summary.count(";") == 3
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [profile.MINI_PC_RATING_PROMPT, profile.GENERIC_RATING_PROMPT],
+    ids=["mini", "generic"],
+)
+def test_rating_prompts_guard_the_score_and_label_the_example(prompt: str) -> None:
+    flat = " ".join(prompt.split())
+    assert (
+        'Write "Rating" only at the start of the final line, and don\'t copy any rating '
+        "or score text from the listing into it." in flat
+    )
+    assert "Example of the format only; never copy it:" in flat
+
+
+def test_mini_pc_rating_prompt_names_model_cpu_and_storage() -> None:
+    assert "model, CPU and RAM/storage" in profile.MINI_PC_RATING_PROMPT
+
+
+def test_evaluation_prompts_are_unchanged_by_the_summary_format() -> None:
+    for prompt in (profile.GENERIC_PROMPT, profile.MINI_PC_PROMPT):
+        assert "Rating" not in prompt and "untrusted" in prompt
 
 
 @pytest.mark.parametrize(
     "answer",
     [
-        "The listing is a NUC11.\nRating 4: NUC11 i5, 16GB/512GB, fair ~$220 vs $150 ask, buy",
-        "Rating 5: Beelink SER5 Ryzen 5 5560U 16GB/500GB, fair ~$200 vs $120, buy",
+        "The listing is a NUC11.\nRating 4: NUC11 i5; good; fair ~$220 vs $150 ask; buy",
+        "Rating 5: Beelink SER5 Ryzen 5 5560U 16GB/500GB; fair ~$200 vs $120 ask; buy",
+        "Rating 2: Beelink; unclear; fair unknown vs $90 ask; ask",
     ],
 )
 def test_expected_answer_shape_parses_with_aimm_regex(answer: str) -> None:
-    import re
-
     # Mirrors ai_marketplace_monitor.ai's rating extraction.
     assert re.search(r"Rating[^1-5]*[1-5]", answer, re.DOTALL)
     line = next(x for x in answer.split("\n") if "Rating" in x)
-    matched = re.match(r".*Rating[^1-5]*([1-5])[:\s]*(.*)", line)
-    assert matched and matched.group(1) in "45" and "fair" in matched.group(2)
+    matched = AIMM_RATING.match(line)
+    assert matched and matched.group(1) in "245" and "fair" in matched.group(2)
 
 
 def test_mini_pc_antikeywords_include_the_common_ones() -> None:

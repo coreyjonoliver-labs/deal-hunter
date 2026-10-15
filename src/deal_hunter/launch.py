@@ -39,8 +39,28 @@
    (watch, phrase index, count; never the phrase or the location), with a
    warning when it is 0.
 
+7. Rating summaries are plain text. aimm stores the rest of the model's
+   ``Rating <n>:`` line as the summary, so a model that bolds its conclusion
+   leaves a stray ``**`` in it. Both backends call ``AIResponse.to_cache`` on
+   the response before returning it; here that call first cleans the comment
+   (summary.py), so the cache, the notifiers and the dashboard all see the
+   same text. If cleaning fails or leaves nothing, aimm's text is kept.
+
+8. The score comes from the start of the rating line. aimm finds it with
+   ``re.match(r".*Rating[^1-5]*([1-5])[:\\s]*(.*)", line)``, whose greedy ``.*``
+   makes the *last* "Rating <n>" on the line win, so seller text copied into the
+   summary ("... a fake 'Rating 5' note") could forge a 5. aimm's ``re`` is
+   replaced by a proxy that answers that one pattern with an anchored match
+   (``Rating <n>:`` at the start of the line, after any markdown) and passes
+   every other call to the real ``re``. A line that doesn't start that way is
+   not a rating line: aimm treats it as a continuation of the summary, or
+   ignores it before the rating line, and a response with no rating line at all
+   scores 1, with one warning per run. If a newer aimm changes that pattern
+   literal, tests/test_launch.py fails (``test_rating_regex_patch_points_still_exist``)
+   rather than letting the greedy match back in.
+
 ``deal-hunter run`` starts aimm through ``main`` in the same process, which
-applies all six. aimm is pinned, and tests/test_launch.py checks the patch points
+applies all eight. aimm is pinned, and tests/test_launch.py checks the patch points
 still exist.
 
 This deliberately has no ``python -m`` entry: ``-m`` puts the current
@@ -60,6 +80,7 @@ from collections.abc import Iterator
 from logging import Logger
 from typing import Any
 
+from ai_marketplace_monitor.ai import AIResponse
 from ai_marketplace_monitor.facebook import FacebookMarketplace, FacebookSearchResultPage
 from ai_marketplace_monitor.monitor import MarketplaceMonitor
 from ai_marketplace_monitor.utils import aimm_event, amm_home, is_substring
@@ -68,6 +89,7 @@ from playwright.sync_api import Error as PlaywrightError
 from deal_hunter import events
 from deal_hunter import session as fb_session
 from deal_hunter.session import Session, SessionError
+from deal_hunter.summary import cap, clean_summary
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -127,6 +149,74 @@ _upstream_monitor_init = MarketplaceMonitor.__init__
 _upstream_login = FacebookMarketplace.login
 _upstream_search = FacebookMarketplace.search
 _upstream_get_listings = FacebookSearchResultPage.get_listings
+_upstream_to_cache = AIResponse.to_cache
+_summary_warned = False
+
+# The literal in both backends' evaluate (checked by tests/test_launch.py), and
+# the strict form: a line-initial "rating" (after whitespace and markdown only: not
+# quotes, ">" or bullets, which a listing could use to forge a line), the FIRST
+# number after it (1-5, optionally "/5", never part of a longer number), then an
+# optional closer and separator before the summary. No second "Rating" is reachable.
+AIMM_RATING_PATTERN = r".*Rating[^1-5]*([1-5])[:\s]*(.*)"
+_STRICT_RATING = re.compile(
+    r"^[\s*_#]*rating(?![A-Za-z])[\s:\-\u2013\u2014]*([1-5])(?:\s*/\s*5)?(?![A-Za-z0-9/]|\.\d)"
+    r"[\s*_]*(?:[:\-\u2013\u2014][\s*_]*)?(.*)$",
+    re.IGNORECASE,
+)
+_rating_warned = False
+
+
+class StrictRatingRe:
+    """Stands in for ``re`` inside ai_marketplace_monitor.ai (see the module docstring, 8)."""
+
+    def match(self, pattern: str, string: str, flags: int = 0) -> re.Match[str] | None:
+        global _rating_warned
+        if pattern != AIMM_RATING_PATTERN:
+            return re.match(pattern, string, flags)
+        matched = _STRICT_RATING.match(string)
+        if matched is None and not _rating_warned and re.match(pattern, string):
+            _rating_warned = True  # event only: never the AI's or the listing's text
+            logging.getLogger("monitor").warning(
+                "[AI] A rating line didn't match the expected format; scored as unrated. "
+                "Further cases are not logged."
+            )
+        return matched
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(re, name)
+
+
+def to_cache_with_clean_summary(
+    self: Any,
+    listing: Any,
+    item_config: Any,
+    marketplace_config: Any,
+    local_cache: Any = None,
+) -> None:
+    """aimm's AIResponse.to_cache, after cleaning the summary it is about to store.
+
+    The response object is the one aimm returns to its caller, so the notifiers
+    get the cleaned text too. A rating is never dropped over its summary: if
+    cleaning fails or leaves nothing, aimm's text is stored (and one warning
+    is logged per run).
+    """
+    global _summary_warned
+    try:
+        cleaned = clean_summary(self.comment)
+    except Exception as e:  # noqa: BLE001 — never lose a rating over its summary text
+        cleaned, reason = "", f"{type(e).__name__}"
+    else:
+        reason = "it was empty after cleaning"
+    if cleaned:
+        self.comment = cleaned
+    elif isinstance(self.comment, str):
+        self.comment = cap(self.comment)  # the length cap holds on every path
+    if not cleaned and not _summary_warned:
+        _summary_warned = True
+        logging.getLogger("monitor").warning(
+            f"[AI] Kept an AI rating summary as written: {reason}. Further cases are not logged."
+        )
+    _upstream_to_cache(self, listing, item_config, marketplace_config, local_cache)
 
 
 def create_page_with_session(self: Any, swap_proxy: bool = False) -> Any:
@@ -369,7 +459,7 @@ def hidden_values(args: list[str]) -> list[str]:
 def main(args: list[str], session: Session | None = None, sandbox: bool = True) -> None:
     """Patch aimm, then run aimm's CLI with args. Exits via SystemExit."""
     global SESSION, SANDBOX
-    from ai_marketplace_monitor import facebook, marketplace, monitor
+    from ai_marketplace_monitor import ai, facebook, marketplace, monitor
     from ai_marketplace_monitor.cli import app
 
     SESSION, SANDBOX = session, sandbox
@@ -387,6 +477,8 @@ def main(args: list[str], session: Session | None = None, sandbox: bool = True) 
     facebook.FacebookMarketplace.login = login_with_session  # type: ignore[method-assign]
     facebook.FacebookMarketplace.search = search_with_session  # type: ignore[method-assign,assignment]
     facebook.FacebookSearchResultPage.get_listings = get_listings_counted  # type: ignore[method-assign]
+    setattr(ai, "re", StrictRatingRe())  # noqa: B010 — aimm's own module-level import
+    ai.AIResponse.to_cache = to_cache_with_clean_summary  # type: ignore[method-assign]
     monitor.MarketplaceMonitor._launch_browser = launch_browser  # type: ignore[method-assign]
     monitor.MarketplaceMonitor.__init__ = monitor_init  # type: ignore[method-assign]
     app(args=args, prog_name="ai-marketplace-monitor")

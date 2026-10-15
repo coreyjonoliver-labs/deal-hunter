@@ -15,7 +15,7 @@ spec each.
   aimm 0.10.2; find out whether it's Facebook markup, throttling or the
   session, and fix or patch it in `launch.py` (also: that message puts the
   Marketplace location id into the events file / dashboard)
-- [ ] rating-summary-format — rating summaries omit the estimated fair price
+- [x] rating-summary-format — rating summaries omit the estimated fair price
   the prompt asks for, and some end in a stray `**` (markdown leaking into the
   comment); tighten the prompts and/or clean the comment before display and
   notification
@@ -48,6 +48,13 @@ spec each.
 
 ## Later
 
+- [ ] rating-parse-followups — the one-per-run "rating line didn't match"
+  warning can fire on a reasoning line that quotes a listing's mid-line
+  "Rating 5" (then reads "scored as unrated" wrongly and uses up its one
+  shot); warn only on lines that *start* like a rating. Fail closed on
+  off-scale shapes `Rating 5 / 10` and `Rating 1-5`. Residual (accepted): a
+  later line that itself starts with "Rating n:" still wins (aimm's loop is
+  last-wins)
 - [ ] ops-metrics — `/metrics` on its own port (heartbeat, search failures,
   session expiry, AI spend, notifications) + generic ServiceMonitor and alert
   rules in `deploy/`; spec Ready, deferred: alerting is scoped to new listings

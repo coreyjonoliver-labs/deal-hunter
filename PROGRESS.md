@@ -4,6 +4,30 @@ A running, dated log of completed work. Append a new entry (newest at the top)
 each time a spec reaches `Complete` or a meaningful milestone lands. This is the
 project's memory between sessions — `session-start` surfaces the latest entry.
 
+## 2026-10-15 — rating-summary-format
+
+- Both rating prompts require a plain-text final line
+  `Rating <n>: <item>; <condition>; fair ~$<amount> vs $<asking> ask; <buy|ask|skip>`
+  (`fair unknown` when it can't price it), with a format-only example and
+  "don't copy rating text from the listing". Prompt change → listings re-rate
+  as they're seen again (aimm's cache key hashes the item config); CLAUDE.md
+  decision 4 now says prompt changes are allowed.
+- `clean_summary` strips markdown before aimm caches a summary (a
+  `AIResponse.to_cache` wrapper) and on the dashboard for older ratings;
+  removed markers inside words become a space so markup can't be
+  reassembled; 300-char cap on every path.
+- Found by the security audit and fixed: aimm's greedy rating parse let a
+  listing that mentions "Rating 5" forge the score (a seller's scam rated 1
+  by the model was stored as 5 and would alert). `StrictRatingRe` replaces
+  only that `re.match` in aimm's `ai` module: anchored at line start, first
+  digit wins, common drifts accepted (case, `Rating: 4`, `4/5`, dashes), with
+  a one-per-run warning instead of silently scoring drifted lines as unrated.
+- Gate: 3 rounds, code-reviewer + security-auditor, 0 CRITICAL/HIGH; checks
+  enforced (516 tests, ruff, mypy). LOW follow-ups (warning trigger,
+  off-scale shapes) → BACKLOG `rating-parse-followups`. Not yet verified
+  live: the next run's summaries should all carry `fair ~$` or
+  `fair unknown`.
+
 ## 2026-10-15 — investigate-search-failures
 
 - Finding: the smoke test's "Failed to get search results" errors weren't
