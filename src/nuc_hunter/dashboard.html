@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="$refresh">
+<title>nuc-hunter</title>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --text: #16181d; --muted: #646b78; --line: #e3e6eb;
+  --accent: #2f6fde; --good: #1f9d55; --warn: #d4870b; --bad: #d64545; --idle: #8a919c;
+  --star: #e8a400; --chip: #eef1f5;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1115; --panel: #171a20; --text: #e7e9ee; --muted: #9aa1ad; --line: #272b33;
+    --accent: #6ea0ff; --good: #3ccf7a; --warn: #f0a531; --bad: #ff6b6b; --idle: #7c8492;
+    --star: #ffc53d; --chip: #222630;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+header { padding: 20px 16px 8px; max-width: 1200px; margin: 0 auto; display: flex;
+  align-items: baseline; gap: 12px; flex-wrap: wrap; }
+header h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+header .sub { color: var(--muted); font-size: 13px; }
+main { max-width: 1200px; margin: 0 auto; padding: 0 16px 40px; }
+.cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 12px 0 20px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+.card .k { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+.card .v { font-size: 24px; font-weight: 650; margin: 4px 0 2px; display: flex; align-items: center; gap: 8px; }
+.card .s { color: var(--muted); font-size: 13px; }
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; background: var(--idle); }
+.dot.good { background: var(--good); } .dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: start; }
+.tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+.tab { padding: 6px 12px; border-radius: 999px; background: var(--chip); color: var(--text); font-size: 14px; }
+.tab span { color: var(--muted); margin-left: 4px; }
+.tab.on { background: var(--accent); color: #fff; } .tab.on span { color: rgba(255,255,255,.8); }
+.result { display: flex; gap: 14px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 12px; padding: 12px; margin-bottom: 10px; }
+.thumb { flex: 0 0 120px; }
+.thumb img, .noimg { width: 120px; height: 120px; object-fit: cover; border-radius: 8px; background: var(--chip); }
+.noimg { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 12px; }
+.body { min-width: 0; flex: 1; }
+.body h3 { margin: 0 0 4px; font-size: 16px; overflow-wrap: anywhere; }
+.meta { color: var(--muted); font-size: 13px; } .meta strong { color: var(--text); }
+.rating { margin-top: 6px; font-weight: 600; font-size: 14px; }
+.rating .stars { color: var(--star); letter-spacing: 1px; }
+.rating.none { color: var(--muted); font-weight: 400; }
+.dropped { margin: 4px 0 0; font-size: 13px; color: var(--warn); }
+.comment { margin: 4px 0 0; font-size: 14px; overflow-wrap: anywhere; }
+.badges { margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap; }
+.badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--good); color: #fff; }
+.badge.muted { background: var(--chip); color: var(--muted); }
+aside section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  padding: 12px 14px; margin-bottom: 12px; }
+aside h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 8px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { text-align: left; font-weight: 400; color: var(--muted); padding: 3px 8px 3px 0; vertical-align: top; width: 45%; }
+td { padding: 3px 0; overflow-wrap: anywhere; }
+.log { list-style: none; margin: 0; padding: 0; font-size: 13px; }
+.log li { padding: 6px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.log li:first-child { border-top: 0; }
+.log time { display: block; color: var(--muted); font-size: 12px; }
+.log li.error { color: var(--bad); }
+.muted { color: var(--muted); } .small { font-size: 12px; margin: 8px 0 0; }
+.bad-text { color: var(--bad); }
+.empty { color: var(--muted); background: var(--panel); border: 1px dashed var(--line); border-radius: 12px; padding: 24px; text-align: center; }
+.banner { background: var(--bad); color: #fff; padding: 8px 12px; border-radius: 8px; }
+footer { color: var(--muted); font-size: 12px; text-align: center; padding: 20px 16px; }
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  .cards { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 480px) {
+  .thumb { flex-basis: 84px; } .thumb img, .noimg { width: 84px; height: 84px; }
+  .card .v { font-size: 20px; }
+}
+</style>
+</head>
+<body>
+<header><h1>nuc-hunter</h1><span class="sub">Mini PCs on Facebook Marketplace near you</span></header>
+<main>
+$errors
+<div class="cards">$cards</div>
+<div class="layout">
+<div><nav class="tabs">$tabs</nav>$results</div>
+<aside>$side</aside>
+</div>
+</main>
+<footer>Updated $generated · refreshes every 5 minutes · <a href="/api/summary.json">JSON</a></footer>
+</body>
+</html>

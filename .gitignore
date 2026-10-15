@@ -1,0 +1,15 @@
+# local settings may contain your location; generated config is derived
+nuc-hunter.toml
+build/
+.env
+# saved Facebook login (`nuc-hunter login`), if session_file points here
+*session*.json
+# write_private temp files; aimm's page dumps (a logged-in page)
+.*.tmp
+debug_*.html
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/

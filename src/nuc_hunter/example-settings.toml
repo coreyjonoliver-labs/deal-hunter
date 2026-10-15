@@ -1,0 +1,51 @@
+# nuc-hunter settings. Copy to nuc-hunter.toml (`nuc-hunter init` does this).
+# No secrets go in this file — credentials come from environment variables.
+
+[location]
+# Facebook Marketplace location slug or numeric id: open Marketplace, search
+# for anything near you, and copy XXX from facebook.com/marketplace/XXX/search
+search_city = "CHANGE_ME"
+radius = 25                 # miles
+# Optional: only keep listings whose seller location contains one of these.
+# seller_locations = ["Springfield", "Shelbyville"]
+
+[search]
+min_price = 40              # filters out $1 "placeholder" listings
+max_price = 400
+interval = "1h"             # random wait between interval and max_interval
+max_interval = "2h"
+include_tiny_pcs = false    # also watch ThinkCentre Tiny / OptiPlex Micro / EliteDesk Mini
+allow_barebones = true      # false drops listings that say barebone / no RAM / no SSD
+# What you want, in plain words. The AI judges every listing against this.
+preferences = """\
+Mini PC for a home server. Prefer Intel 8th gen or newer (or N100 and newer), \
+or AMD Ryzen 4000 series or newer. 16GB+ RAM preferred, upgradeable. Power \
+adapter must be included.\
+"""
+# extra_antikeywords = ["celeron j4125"]
+
+[ai]
+provider = "anthropic"      # anthropic | openai | ollama | none
+# model = "claude-haiku-4-5-20251001"
+rating = 3                  # notify for AI rating >= this (1-5)
+# base_url = "http://localhost:11434/v1"   # ollama only
+
+[notify]
+# Any of: ntfy, pushover, telegram, pushbullet, email. Empty = console only.
+methods = []
+# ntfy_server = "https://ntfy.sh"   # ntfy only; set for a self-hosted server
+# email = "you@example.com"         # required for the email method
+# smtp_server = "smtp.example.com"  # email only; default smtp.<your domain>
+# smtp_username = "you@example.com" # email only; default is the address
+# smtp_port = 587
+
+[facebook]
+# true = no login, headless browser. Fewer results; Facebook may block sooner.
+anonymous = false
+# Where `nuc-hunter login` saves your Facebook login for `run` to reuse.
+# session_file = "~/.ai-marketplace-monitor/facebook-session.json"
+# true = headless, and exit with an error instead of waiting for a login when
+# the saved session is missing or expired. For unattended runs (a server).
+# require_session = false
+# Chromium's sandbox. Only set false where it can't start (some containers).
+# browser_sandbox = true

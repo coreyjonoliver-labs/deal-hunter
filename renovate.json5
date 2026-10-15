@@ -1,0 +1,40 @@
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: ['config:recommended'],
+  // Digest-pin the Dockerfile base images and GitHub Actions; Renovate bumps
+  // tag + digest together.
+  pinDigests: true,
+  // Supply-chain cooldown: nothing merges until the release is 5 days old,
+  // so a malicious release has time to be noticed and pulled.
+  minimumReleaseAge: '5 days',
+  internalChecksFilter: 'strict',
+  packageRules: [
+    {
+      // Routine bumps merge once the build workflow (tests + image build) passes.
+      matchUpdateTypes: ['minor', 'patch', 'pin', 'digest'],
+      automerge: true,
+    },
+    {
+      // A Python minor (3.12 -> 3.13) or a Playwright minor (a new Chromium)
+      // can change runtime behaviour the tests don't exercise (CI never opens
+      // Facebook): review those by hand.
+      matchPackageNames: ['docker.io/library/python', 'python', 'playwright'],
+      matchUpdateTypes: ['major', 'minor'],
+      automerge: false,
+    },
+    {
+      // A moved Action tag shows up as a digest update; it runs with
+      // packages: write in CI, so look before merging.
+      matchManagers: ['github-actions'],
+      matchUpdateTypes: ['digest'],
+      automerge: false,
+    },
+    {
+      // Generated config and the AI prompt are written against this exact
+      // release's schema; tests/test_launch.py pins the patched functions.
+      // Upgrade it by hand.
+      matchPackageNames: ['ai-marketplace-monitor'],
+      enabled: false,
+    },
+  ],
+}
