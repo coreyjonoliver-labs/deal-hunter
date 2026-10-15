@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import re
+import stat
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -171,10 +172,14 @@ def read_events(path: Path, max_bytes: int = READ_BYTES) -> Iterator[dict[str, A
     Skips lines that aren't events (a torn last line) and overlong ones.
     """
     try:
-        f = path.open("rb")
-    except FileNotFoundError:
+        # Never a link: the monitor's side could point one anywhere web can read.
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except (FileNotFoundError, OSError):
         return
+    f = os.fdopen(fd, "rb")
     with f:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return
         size = f.seek(0, os.SEEK_END)
         f.seek(max(0, size - max_bytes))
         data = f.read(max_bytes)

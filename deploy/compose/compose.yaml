@@ -8,7 +8,8 @@
 #   3. docker compose up -d, then open http://127.0.0.1:8740/.
 #
 # This limits what the containers can do on the host, not where the browser
-# can connect: Compose can't filter egress by host name. The browser runs
+# can connect: Compose can't filter egress by host name, so the monitor can
+# reach your LAN and a cloud host's metadata service (169.254.169.254). The browser runs
 # without Chromium's sandbox, so before running it unattended add a sandboxed
 # runtime (uncomment `runtime` below for gVisor, or use Kata) and an egress
 # filter (a firewall or proxy allowing Facebook and your AI provider; see
@@ -21,6 +22,7 @@ x-hardening: &hardening
   cap_drop: [ALL]
   security_opt: [no-new-privileges:true]
   user: "1000:1000"
+  pids_limit: 512
   # runtime: runsc
 
 services:

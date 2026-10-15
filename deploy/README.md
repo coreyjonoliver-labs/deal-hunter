@@ -45,7 +45,7 @@ user.
 So, in order of preference:
 
 1. **A microVM runtime plus an egress allowlist** (`kata` +
-   `cilium-egress`): the setup this project is run with.
+   `cilium-egress`): the strongest of these.
 2. **runc with Chromium's sandbox restored**: a `Localhost` seccomp profile
    that allows the user-namespace `clone`/`unshare` calls Chromium makes,
    installed on each node, and `browser_sandbox = true`. That puts two

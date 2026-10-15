@@ -288,7 +288,9 @@ def collect(settings: Settings, home: Path, now: float | None = None) -> Snapsho
             notified=listing_id in notified,
         )
         # aimm keys ratings by the listing's hash, which includes the search
-        # item's (watch's) name; the cached details have it blank.
+        # item's (watch's) name; the cached details have it blank. A listing
+        # two watches found has a rating from each: show the best one.
+        best: tuple[int, float, str, str] | None = None
         for name in names:
             try:
                 listing_hash = Listing(**{**details, "name": name}).hash
@@ -298,11 +300,10 @@ def collect(settings: Settings, home: Path, now: float | None = None) -> Snapsho
                 value, rated_at = rating
                 score = value.get("score")
                 if isinstance(score, int) and 1 <= score <= 5:
-                    result.score = score
-                    result.comment = str(value.get("comment", ""))
-                    result.rated_at = rated_at
-                    result.watch = name
-                break
+                    candidate = (score, rated_at, name, str(value.get("comment", "")))
+                    best = max(best, candidate) if best else candidate
+        if best is not None:
+            result.score, result.rated_at, result.watch, result.comment = best
         text = f"{result.title}  {result.description}"
         per_item = {
             name: drop_reasons(
@@ -310,10 +311,13 @@ def collect(settings: Settings, home: Path, now: float | None = None) -> Snapsho
             )
             for name, item in items.items()
         }
-        if result.watch is None:
+        if result.watch is not None:
+            # Judged by the watch that rated it, whatever the others say.
+            result.dropped = per_item[result.watch]
+        else:
             result.watch = next((name for name, reasons in per_item.items() if not reasons), None)
-        if per_item and all(per_item.values()):
-            result.dropped = per_item.get(result.watch or "") or next(iter(per_item.values()))
+            if per_item and result.watch is None:
+                result.dropped = next(iter(per_item.values()))
         results.append(result)
     cache_db = home / "cache.db"
     return Snapshot(

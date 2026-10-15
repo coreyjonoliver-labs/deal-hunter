@@ -21,10 +21,23 @@ images:
     # digest: sha256:...   # pin it; the tag moves with every build of main
 patches:
   # The host name your authenticating proxy serves the dashboard on.
-  - target:
+  - patch: |-
+      apiVersion: apps/v1
       kind: Deployment
-      name: deal-hunter
-    patch: |-
-      - op: replace
-        path: /spec/template/spec/containers/1/args/8
-        value: deal-hunter.example.com
+      metadata:
+        name: deal-hunter
+      spec:
+        template:
+          spec:
+            containers:
+              - name: web
+                args:
+                  - --settings
+                  - /config/deal-hunter.toml
+                  - web
+                  - --host
+                  - 0.0.0.0
+                  - --port
+                  - "8740"
+                  - --allow-host
+                  - deal-hunter.example.com

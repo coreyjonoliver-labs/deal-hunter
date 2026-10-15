@@ -113,7 +113,13 @@ allow_barebones = false         # mini-pc / tiny-pc only
 deal-hunter is nuc-hunter renamed. A `nuc-hunter.toml` in the current
 directory still loads (with a note to rename it), and the next `run` moves
 `nuc-hunter-events.jsonl` to `deal-hunter-events.jsonl` so the dashboard's
-history carries over. The container image's home is now `/home/hunter`.
+history carries over.
+
+For a container deployment, update the image (`ghcr.io/<owner>/deal-hunter`)
+and move the mount of aimm's home from `/home/nuc/.ai-marketplace-monitor`
+to `/home/hunter/.ai-marketplace-monitor`; the volume's contents carry over
+as they are. Your settings file, Secrets and volume names don't need to change,
+and neither does a settings file in the old `[search]` format.
 
 ## Run
 
@@ -350,7 +356,9 @@ read what's generated.
   `uv.lock`.
 - ai-marketplace-monitor **also** reads `~/.ai-marketplace-monitor/config.toml`
   if it exists, and merges it in. Keep that file empty or remove it, or its
-  items will run too.
+  items will run too. With `facebook.require_session` (unattended), `run`
+  deletes it at every start: nothing legitimate writes it there, and a
+  compromised browser could.
 - Searches run every 1–2 hours by default. Shorter intervals and more search
   phrases get the account throttled faster.
 - Page loads time out after 60 seconds and are retried 10 times (upstream
