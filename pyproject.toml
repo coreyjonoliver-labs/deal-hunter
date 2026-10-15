@@ -1,6 +1,6 @@
 [project]
 name = "deal-hunter"
-version = "0.2.0"
+version = "0.3.0"
 description = "Watch Facebook Marketplace for the things you want, judged and ranked by AI (a front-end for ai-marketplace-monitor)."
 readme = "README.md"
 requires-python = ">=3.10,<3.14"

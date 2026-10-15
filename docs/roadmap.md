@@ -21,6 +21,8 @@ Objective: what `deploy/` ships is exactly what was reviewed and published.
 | [live-watch-smoke-test](specs/live-watch-smoke-test.md) | None | Complete |
 | [investigate-search-failures](specs/investigate-search-failures.md) | None | Complete |
 | [rating-summary-format](specs/rating-summary-format.md) | None | Complete |
+| [release-0-3-0](specs/release-0-3-0.md) | None | In Progress |
+| bump-aimm (deferred) | None | — |
 | immutable-release-tags | None | — |
 
 ## Phase 2 — Hardening
