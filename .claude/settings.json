@@ -1,0 +1,88 @@
+{
+  "$comment": [
+    "Project settings for Claude Code. Checked into git so the whole team shares",
+    "the same guardrails. Personal, machine-specific overrides go in",
+    ".claude/settings.local.json (gitignored).",
+    "",
+    "permissions.allow lists the tools Claude may use without prompting.",
+    "permissions.deny is a belt-and-braces glob layer ON TOP OF the guard hooks,",
+    "which now ship in the spec-workflow plugin (not this file). The hooks do the",
+    "real work because they scan full command strings and resolve symlinks, which",
+    "glob rules cannot. See the plugin's hooks/README.md for the design and",
+    "self-tests; the hook wiring lives in the plugin's hooks/hooks.json.",
+    "",
+    "spec-workflow.json is denied here AND in the guards: the bash guard reads the",
+    "protected branch from it, so letting the agent edit it would be a guard bypass.",
+    "It is operator-edit-only, like settings.json and the hooks themselves.",
+    "",
+    "The sandbox block below is the OS-enforced boundary the guard hooks only",
+    "point at (they are a blocklist; this is deny-by-default). enabled+denyRead",
+    "closes the credential-read gap: without it a sandboxed command can still",
+    "read ~/.aws/~/.ssh. autoAllowBashIfSandboxed runs sandboxed Bash without",
+    "prompting (the OS boundary makes that safe). excludedCommands run OUTSIDE",
+    "the sandbox (gh/docker are incompatible) and fall back to normal prompts.",
+    "macOS needs nothing; Linux/WSL2 needs `bubblewrap` + `socat`. With",
+    "failIfUnavailable unset (default false), a host missing those deps WARNS and",
+    "runs unsandboxed rather than refusing to start — so shipping enabled is safe;",
+    "install the deps to actually get the boundary. The established profile sets",
+    "failIfUnavailable:true to refuse that fallback. Per profile + the",
+    "unattended-boundary rule: see the spec-workflow plugin's docs/sandboxing.md."
+  ],
+  "permissions": {
+    "allow": [
+      "Read",
+      "Write",
+      "Edit",
+      "Bash",
+      "Grep",
+      "Glob"
+    ],
+    "deny": [
+      "Edit(./.claude/hooks/**)",
+      "Write(./.claude/hooks/**)",
+      "Edit(./.claude/settings.json)",
+      "Write(./.claude/settings.json)",
+      "Edit(./.claude/settings.local.json)",
+      "Write(./.claude/settings.local.json)",
+      "Edit(./.claude/spec-workflow.json)",
+      "Write(./.claude/spec-workflow.json)",
+      "Edit(./.git/hooks/**)",
+      "Write(./.git/hooks/**)",
+      "Edit(./.github/workflows/**)",
+      "Write(./.github/workflows/**)",
+      "Read(./.env)",
+      "Edit(./.env)",
+      "Write(./.env)",
+      "Read(**/*.pem)",
+      "Edit(**/*.pem)",
+      "Write(**/*.pem)",
+      "Read(**/id_rsa)",
+      "Read(**/id_ed25519)",
+      "Read(**/.ssh/**)",
+      "Edit(**/.ssh/**)",
+      "Write(**/.ssh/**)"
+    ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true,
+    "filesystem": {
+      "denyRead": [
+        "~/.ssh",
+        "~/.aws",
+        "~/.gnupg",
+        "~/.config/gh"
+      ],
+      "allowWrite": [
+        "~/.cache/uv"
+      ]
+    },
+    "excludedCommands": [
+      "gh *",
+      "docker *"
+    ],
+    "network": {
+      "allowLocalBinding": true
+    }
+  }
+}

@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+import os
 import signal
+import tempfile
 from collections.abc import Iterator
 from typing import Any
 
-import pytest
+# Before anything imports aimm: its utils module creates and opens
+# ~/.ai-marketplace-monitor/cache.db at import, and the tests must never touch
+# the real one (nor can they, inside a sandbox).
+os.environ["HOME"] = tempfile.mkdtemp(prefix="deal-hunter-test-home-")
 
-from deal_hunter import session
+import pytest  # noqa: E402
+
+from deal_hunter import session  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
