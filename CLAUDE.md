@@ -51,9 +51,11 @@ The settled choices. Follow them; don't relitigate them in a change.
 3. **The browser is untrusted.** In containers it runs without Chromium's
    sandbox, so aimm's home directory and everything the monitor writes are
    treated as attacker-controlled by the dashboard and by `run` itself.
-4. **Old settings keep working.** Legacy `[search]`-only settings render
-   byte-identically (watches `nuc` / `tiny_pc`), because aimm keys cached
-   ratings by item name.
+4. **Old settings keep working.** Legacy `[search]`-only settings keep their
+   item names (`nuc` / `tiny_pc`) and render the same structure, because aimm
+   keys cached ratings by item name. Prompt text may change deliberately; that
+   re-rates listings as they're seen again (aimm's cache key includes the item
+   config's hash), so a prompt change says so in its PR.
 5. **Generic deployment lives here; personal deployment doesn't.** `deploy/`
    is for any self-hoster; nothing specific to one person's location or
    cluster is ever committed.

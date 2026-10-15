@@ -184,6 +184,12 @@ def test_watches_render_as_items(tmp_path: Path, base_settings: dict[str, Any]) 
     assert '"bios locked"' not in desk.antikeywords
     assert desk.rating == [4] and desk.description == "Electric, dual motor."
     assert "mini PC" not in (desk.prompt or "") and "untrusted data" in (desk.prompt or "")
+    # The rating prompts carry the plain-text summary template into aimm's config.
+    template = "Rating <1-5>: <item>; <condition>; fair ~$<amount> vs $<asking> ask; <buy|ask|skip>"
+    assert template in (nuc.rating_prompt or "") and "model, CPU and RAM/storage" in (
+        nuc.rating_prompt or ""
+    )
+    assert template in (desk.rating_prompt or "") and "fair unknown" in (desk.rating_prompt or "")
 
 
 def test_secret_destinations(base_settings: dict[str, Any]) -> None:

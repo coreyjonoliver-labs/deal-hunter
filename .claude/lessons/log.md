@@ -83,4 +83,35 @@ consolidates recurring ones into rules.
   module: "src/deal_hunter/events.py"
   tags: [redaction, word-boundary]
   finding: "Redaction of short identifiers (slugs, ids) must match on token boundaries, not as bare substrings; otherwise a two-letter value garbles unrelated text and can hide what actually failed."
+
+- date: 2026-10-15
+  source: "rating-summary-format / aimm ai.py:347,474 (via profile.py rating prompts) / security-auditor"
+  importance: 7
+  mechanizable: yes
+  scope: unclassified
+  category: security
+  module: "src/deal_hunter/launch.py"
+  tags: [prompt-injection, parsing, aimm-patch, rating]
+  finding: "Parsing a score out of model output that can contain seller text must anchor on the model's own marker (start of line) and take the first number after it; a greedy pattern lets a listing that mentions 'Rating 5' forge the score. Any prompt change that puts listing text on the rating line needs a forged-rating regression test."
+
+- date: 2026-10-15
+  source: "rating-summary-format / src/deal_hunter/summary.py:31 / security-auditor"
+  importance: 5
+  mechanizable: yes
+  scope: unclassified
+  category: security
+  module: "src/deal_hunter/summary.py"
+  tags: [sanitizing, markup, untrusted-text]
+  finding: "A text cleaner that deletes characters can reassemble markup from fragments (ja**vascript → javascript); replace mid-word removals with a space, treat the output as plain text that still needs escaping, and escape after cleaning, never before."
+
+- date: 2026-10-15
+  source: "rating-summary-format / src/deal_hunter/launch.py:156 / code-reviewer"
+  importance: 5
+  mechanizable: yes
+  scope: unclassified
+  category: runtime-errors
+  module: "src/deal_hunter/launch.py"
+  tags: [parsing, fail-closed, silent-failure, alerts]
+  recurrence_of: "2026-10-15 / forged rating via greedy parse (same parser, opposite failure)"
+  finding: "Tightening a parser for safety must not make legitimate variants fail silently: accept the format's common drifts (case, separators, n/5) while keeping the anchor, and log when the old parser would have matched but the new one didn't — fail closed, but visibly."
 ```

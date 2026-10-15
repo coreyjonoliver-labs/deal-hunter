@@ -46,6 +46,7 @@ from urllib.parse import parse_qs, quote, urlparse
 from deal_hunter import session as fb_session
 from deal_hunter.events import events_path, read_events
 from deal_hunter.settings import Settings
+from deal_hunter.summary import cap, clean_summary
 
 # $ per million tokens (input, output), by model-name prefix. Cache reads are
 # billed at a tenth of input, cache writes at 1.25x.
@@ -313,7 +314,10 @@ def collect(
                     candidate = (score, rated_at, name, str(value.get("comment", "")))
                     best = max(best, candidate) if best else candidate
         if best is not None:
-            result.score, result.rated_at, result.watch, result.comment = best
+            result.score, result.rated_at, result.watch, comment = best
+            # Ratings cached before summaries were cleaned at write time still carry
+            # markdown debris; an all-markdown summary stays as aimm stored it.
+            result.comment = clean_summary(comment) or cap(comment)
         text = f"{result.title}  {result.description}"
         memo_key = (result.title, result.description, result.price, result.location)
         per_item = seen.get(memo_key)

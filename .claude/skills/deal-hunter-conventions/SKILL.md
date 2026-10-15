@@ -232,7 +232,9 @@ skill or `CLAUDE.md` covers, update this checklist too.
    `_str` / `_int` / `_bool` / `_str_list` helpers (they reject `${` and wrong
    types); for a `[[watch]]` key, add it to `WATCH_KEYS` too.
 2. Wire it in `render.py` (or wherever it's used); keep old settings files
-   loading — legacy `[search]` settings must render byte-identically.
+   loading — legacy `[search]` settings must keep their item names and
+   structure (a deliberate prompt change is the only allowed difference, and
+   it re-rates listings as they're seen again).
 3. Tests: defaults, valid values, a parametrized bad-value case, and the rendered
    config loading in aimm's `Config`.
 4. Docs: `example-settings.toml`, README.

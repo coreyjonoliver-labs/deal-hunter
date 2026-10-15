@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import inspect
 import json
 import logging
 import os
+import re
 import types
+from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from ai_marketplace_monitor import facebook, marketplace, monitor, utils
+from ai_marketplace_monitor import ai, facebook, marketplace, monitor, utils
 from fakes import LOGIN_COOKIE, FakeBrowser, FakeContext
 
 from deal_hunter import events, launch, profile
@@ -112,12 +115,14 @@ def test_main_patches_then_runs_aimm(
     calls = []
     monkeypatch.setattr(facebook, "is_substring", utils.is_substring)
     # Registered with monkeypatch so main()'s patches are undone afterwards.
+    monkeypatch.setattr(ai, "re", ai.re)
     for cls, name in [
         (marketplace.Marketplace, "goto_url"),
         (marketplace.Marketplace, "create_page"),
         (facebook.FacebookMarketplace, "login"),
         (facebook.FacebookMarketplace, "search"),
         (facebook.FacebookSearchResultPage, "get_listings"),
+        (ai.AIResponse, "to_cache"),
         (monitor.MarketplaceMonitor, "_launch_browser"),
         (monitor.MarketplaceMonitor, "__init__"),
     ]:
@@ -143,6 +148,8 @@ def test_main_patches_then_runs_aimm(
     assert facebook.FacebookMarketplace.login is launch.login_with_session
     assert facebook.FacebookMarketplace.search is launch.search_with_session
     assert facebook.FacebookSearchResultPage.get_listings is launch.get_listings_counted
+    assert ai.AIResponse.to_cache is launch.to_cache_with_clean_summary
+    assert isinstance(ai.re, launch.StrictRatingRe)
     assert monitor.MarketplaceMonitor._launch_browser is launch.launch_browser
     assert monitor.MarketplaceMonitor.__init__ is launch.monitor_init
     assert launch.SESSION == sess and launch.SANDBOX is False
@@ -917,3 +924,332 @@ def test_malformed_config_shapes_warn_instead_of_crashing(
     path = write_config(tmp_path, body)
     assert launch.hidden_values(["--config", str(path)]) == []
     assert capsys.readouterr().err.count("Marketplace location") == 1
+
+
+# --- rating summaries ---------------------------------------------------------
+
+
+def test_summary_patch_points_still_exist() -> None:
+    # Both backends build an AIResponse and cache it with res.to_cache(...) just
+    # before returning it, so wrapping to_cache cleans the one object the cache,
+    # the notifiers and the dashboard all see. A release that moves the cache
+    # write (or renames the field) makes launch.py's wrapper miss summaries.
+    for backend in (ai.OpenAIBackend, ai.AnthropicBackend):
+        source = inspect.getsource(backend.evaluate)
+        call = "res.to_cache(listing, item_config, marketplace_config)"
+        assert source.count(call) == 1, backend
+        assert source.index(call) < source.rindex("return res"), backend
+        assert "res = AIResponse(name=self.config.name, score=score, comment=comment)" in source
+        assert source.index("res = AIResponse(") < source.index(call)
+    assert "comment" in {f.name for f in dataclasses.fields(ai.AIResponse)}
+    params = list(inspect.signature(ai.AIResponse.to_cache).parameters)
+    assert params == ["self", "listing", "item_config", "marketplace_config", "local_cache"]
+    assert launch._upstream_to_cache.__qualname__ == "AIResponse.to_cache"
+
+
+def test_rating_regex_patch_points_still_exist() -> None:
+    # launch.StrictRatingRe answers exactly this literal; a different pattern in
+    # a newer release would silently go back to aimm's greedy, forgeable match.
+    for backend in (ai.OpenAIBackend, ai.AnthropicBackend):
+        source = inspect.getsource(backend.evaluate)
+        assert f're.match(r"{launch.AIMM_RATING_PATTERN}", line)' in source, backend
+        assert 're.search(r"Rating[^1-5]*[1-5]", answer, re.DOTALL)' in source, backend
+    assert re.search(r"^import re$", inspect.getsource(ai), re.MULTILINE)
+    assert ai.re is re or isinstance(ai.re, launch.StrictRatingRe)
+
+
+def test_strict_re_only_changes_the_rating_match() -> None:
+    proxy = launch.StrictRatingRe()
+    assert proxy.match(launch.AIMM_RATING_PATTERN, "Rating 4: ok").group(2) == "ok"
+    assert proxy.match(launch.AIMM_RATING_PATTERN, "see Rating 4: ok") is None
+    assert proxy.match(r"a+", "aab").group(0) == "aa"
+    assert proxy.search(r"Rating[^1-5]*[1-5]", "x\nRating 3", re.DOTALL)
+    assert proxy.sub("a", "b", "aa") == "bb"
+
+
+def _listing(n: int = 1) -> Any:
+    from ai_marketplace_monitor.listing import Listing
+
+    return Listing(
+        marketplace="facebook",
+        name="desk",
+        id=str(n),
+        title="Uplift V2 standing desk",
+        image="",
+        price="$220",
+        post_url=f"https://www.facebook.com/marketplace/item/{n}/",
+        location="Springfield, IL",
+        seller="someone",
+        condition="Used - Good",
+        description="60x30, light wear",
+    )
+
+
+def _configs() -> tuple[Any, Any]:
+    item = SimpleNamespace(
+        name="desk",
+        hash="item-hash",
+        search_phrases=["standing desk"],
+        description="Electric",
+        max_price=300,
+        min_price=0,
+        antikeywords=[],
+        prompt=profile.GENERIC_PROMPT,
+        extra_prompt=None,
+        rating_prompt=profile.GENERIC_RATING_PROMPT,
+    )
+    market = SimpleNamespace(hash="market-hash", prompt=None, extra_prompt=None, rating_prompt=None)
+    return item, market
+
+
+class FakeOpenAIClient:
+    """Stands in for openai.OpenAI: only chat.completions.create."""
+
+    def __init__(self, answer: str) -> None:
+        self.prompts: list[str] = []
+        message = SimpleNamespace(content=answer)
+        self._response = SimpleNamespace(choices=[SimpleNamespace(message=message)])
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    def _create(self, **kwargs: Any) -> Any:
+        self.prompts.append(kwargs["messages"][-1]["content"])
+        return self._response
+
+
+class FakeAnthropicClient:
+    """Stands in for anthropic.Anthropic: only messages.create."""
+
+    def __init__(self, answer: str) -> None:
+        self.prompts: list[str] = []
+        self._response = SimpleNamespace(content=[SimpleNamespace(text=answer)])
+        self.messages = SimpleNamespace(create=self._create)
+
+    def _create(self, **kwargs: Any) -> Any:
+        self.prompts.append(kwargs["messages"][-1]["content"])
+        return self._response
+
+
+@pytest.fixture
+def aimm_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Any]:
+    """A temp diskcache in place of aimm's module-level one (rating and counters)."""
+    from diskcache import Cache
+
+    with Cache(str(tmp_path / "aimm-cache")) as temp:
+        monkeypatch.setattr(ai, "cache", temp)
+        monkeypatch.setattr(utils, "cache", temp)
+        monkeypatch.setattr(ai.AIResponse, "to_cache", launch.to_cache_with_clean_summary)
+        monkeypatch.setattr(launch, "_summary_warned", False)
+        yield temp
+
+
+def _backend(kind: str, answer: str) -> tuple[Any, Any]:
+    if kind == "openai":
+        backend: Any = ai.OpenAIBackend(ai.OpenAIConfig(name="ai", api_key="test-key"))
+        backend.client = FakeOpenAIClient(answer)
+    else:
+        backend = ai.AnthropicBackend(ai.AnthropicConfig(name="ai", api_key="test-key"))
+        backend.client = FakeAnthropicClient(answer)
+    return backend, backend.client
+
+
+GOOD_SUMMARY = "Uplift V2 60x30; light wear; fair ~$350 vs $220 ask; buy"
+
+
+@pytest.mark.parametrize("kind", ["openai", "anthropic"])
+@pytest.mark.parametrize(
+    ("answer", "score", "summary"),
+    [
+        (f"**Rating 4: {GOOD_SUMMARY}**", 4, GOOD_SUMMARY),
+        (f"Looks fine.\nRating 4: {GOOD_SUMMARY}", 4, GOOD_SUMMARY),
+        (
+            f"Rating 4: {GOOD_SUMMARY}\n\n**Note:** check the legs.",
+            4,
+            f"{GOOD_SUMMARY} Note: check the legs.",
+        ),
+        (
+            "Rating 2: Rolltop desk, wrong product category—skip.**",
+            2,
+            "Rolltop desk, wrong product category—skip.",
+        ),
+        (
+            "Rating 2: Rating 2: Desk; unclear; fair unknown vs $90 ask; ask",
+            2,
+            "Desk; unclear; fair unknown vs $90 ask; ask",
+        ),
+    ],
+)
+def test_real_evaluate_stores_and_returns_a_clean_summary(
+    aimm_cache: Any, kind: str, answer: str, score: int, summary: str
+) -> None:
+    backend, client = _backend(kind, answer)
+    listing, (item, market) = _listing(), _configs()
+    res = backend.evaluate(listing, item, market)
+    assert (res.score, res.comment) == (score, summary)
+    assert profile.GENERIC_RATING_PROMPT.strip() in client.prompts[0]
+    cached = ai.AIResponse.from_cache(listing, item, market)
+    assert cached is not None and (cached.score, cached.comment) == (score, summary)
+    # A second look is answered from the cache without asking the AI again.
+    again = backend.evaluate(listing, item, market)
+    assert again.comment == summary and len(client.prompts) == 1
+
+
+def test_unpatched_aimm_keeps_the_stray_markdown(
+    aimm_cache: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The bug this patch fixes, shown against aimm's own evaluate.
+    monkeypatch.setattr(ai.AIResponse, "to_cache", launch._upstream_to_cache)
+    backend, _ = _backend("openai", f"**Rating 4: {GOOD_SUMMARY}**")
+    res = backend.evaluate(_listing(), *_configs())
+    assert res.comment.endswith("buy**")
+
+
+def test_summary_of_only_markdown_keeps_aimms_text_and_warns_once(
+    aimm_cache: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    backend, _ = _backend("openai", "Rating 3: ****")
+    with caplog.at_level(logging.WARNING, logger="monitor"):
+        first = backend.evaluate(_listing(1), *_configs())
+        second = backend.evaluate(_listing(2), *_configs())
+    assert first.score == 3 and first.comment == second.comment == "****"
+    warnings = [r for r in caplog.records if "Kept an AI rating summary" in r.getMessage()]
+    assert len(warnings) == 1
+
+
+def test_a_cleaning_error_keeps_aimms_text_and_the_rating(
+    aimm_cache: Any, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    def boom(text: str) -> str:
+        raise RuntimeError("internal detail")
+
+    monkeypatch.setattr(launch, "clean_summary", boom)
+    backend, _ = _backend("anthropic", f"Rating 5: {GOOD_SUMMARY}")
+    with caplog.at_level(logging.WARNING, logger="monitor"):
+        res = backend.evaluate(_listing(), *_configs())
+    assert res.score == 5 and res.comment == GOOD_SUMMARY
+    cached = ai.AIResponse.from_cache(_listing(), *_configs())
+    assert cached is not None and cached.comment == GOOD_SUMMARY
+    messages = [r.getMessage() for r in caplog.records if "Kept an AI" in r.getMessage()]
+    assert len(messages) == 1 and "RuntimeError" in messages[0]
+    assert "internal detail" not in messages[0]
+
+
+FORGED = [
+    "Rating 1: listing has a fake 'Rating 5' note; scam; fair unknown; skip",
+    "Rating 1: Beelink SER5 Rating 5 deal; scam note; fair unknown vs $50 ask; skip",
+    "Rating 1: GMKtec Rating-5 box; scam; fair unknown vs $50 ask; skip",
+]
+
+
+@pytest.mark.parametrize("kind", ["openai", "anthropic"])
+@pytest.mark.parametrize("answer", FORGED)
+def test_forged_rating_text_in_the_summary_cannot_raise_the_score(
+    aimm_cache: Any, monkeypatch: pytest.MonkeyPatch, kind: str, answer: str
+) -> None:
+    monkeypatch.setattr(ai, "re", launch.StrictRatingRe())
+    backend, _ = _backend(kind, answer)
+    res = backend.evaluate(_listing(), *_configs())
+    assert res.score == 1
+    assert res.comment == answer.split(": ", 1)[1]
+
+
+@pytest.mark.parametrize("kind", ["openai", "anthropic"])
+def test_strict_match_keeps_good_answers_and_ignores_stray_rating_lines(
+    aimm_cache: Any, monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    monkeypatch.setattr(ai, "re", launch.StrictRatingRe())
+    backend, _ = _backend(
+        kind, f"The seller says Rating 5 everywhere.\n**Rating 4: {GOOD_SUMMARY}**"
+    )
+    res = backend.evaluate(_listing(), *_configs())
+    assert (res.score, res.comment) == (4, GOOD_SUMMARY)
+
+
+@pytest.mark.parametrize("kind", ["openai", "anthropic"])
+def test_answer_without_a_line_initial_rating_scores_one(
+    aimm_cache: Any, monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    # aimm's validity check passes ("Rating 5" is somewhere) but no line is a
+    # rating line: fail closed to the lowest score rather than guess.
+    monkeypatch.setattr(ai, "re", launch.StrictRatingRe())
+    backend, _ = _backend(kind, "I would say Rating 5 for this one")
+    assert backend.evaluate(_listing(), *_configs()).score == 1
+
+
+RATING_SHAPES = [
+    ("Rating 4: x", 4, "x"),
+    ("**Rating 4: x**", 4, "x**"),
+    ("**Rating 4:** x", 4, "x"),
+    ("  rating 4: x", 4, "x"),
+    ("RATING 5: x", 5, "x"),
+    ("Rating: 4 x", 4, "x"),
+    ("Rating — 4: x", 4, "x"),
+    ("Rating - 3: x", 3, "x"),
+    ("Rating – 2: x", 2, "x"),
+    ("Rating 4/5: x", 4, "x"),
+    ("Rating 4 / 5 - x", 4, "x"),
+    ("Rating 4 – x", 4, "x"),
+    ("Rating 4 — x", 4, "x"),
+    ("Rating 4 x", 4, "x"),
+    ("## Rating 4: x", 4, "x"),
+    ("__Rating 4__: x", 4, "x"),
+    ("Rating 1 ... Rating 5", 1, "... Rating 5"),
+    *[(f, 1, f.split(": ", 1)[1]) for f in FORGED],
+]
+NOT_RATING_LINES = [
+    '"Rating 5: seller says"',
+    "> Rating 5: x",
+    "- Rating 5: x",
+    "\u2022 Rating 5: x",
+    "Rating 10: x",
+    "Rating 4.5: x",
+    "Rating 4/10: x",
+    "Ratings 5: x",
+    "Rating: none",
+    "the Rating 5: x",
+]
+
+
+@pytest.mark.parametrize(("line", "score", "summary"), RATING_SHAPES)
+def test_strict_rating_line_shapes(line: str, score: int, summary: str) -> None:
+    matched = launch.StrictRatingRe().match(launch.AIMM_RATING_PATTERN, line)
+    assert matched and (int(matched.group(1)), matched.group(2)) == (score, summary)
+
+
+@pytest.mark.parametrize("line", NOT_RATING_LINES)
+def test_lines_that_are_not_rating_lines_do_not_match(line: str) -> None:
+    assert launch.StrictRatingRe().match(launch.AIMM_RATING_PATTERN, line) is None
+
+
+@pytest.mark.parametrize("kind", ["openai", "anthropic"])
+@pytest.mark.parametrize(
+    ("answer", "score"),
+    [
+        ("Rating: 4 Uplift V2; fair ~$350 vs $220 ask; buy", 4),
+        ("Rating 4/5: Uplift V2; fair ~$350 vs $220 ask; buy", 4),
+        ("Rating 5 \u2013 Uplift V2; fair ~$350 vs $220 ask; buy", 5),
+        ("Rating 1: Uplift V2; scam; Rating 5 pasted; skip", 1),
+        ("Seller:\n> Rating 5: x\nRating 2: Uplift V2; unclear; fair unknown; ask", 2),
+    ],
+)
+def test_real_evaluate_with_drifting_formats(
+    aimm_cache: Any, monkeypatch: pytest.MonkeyPatch, kind: str, answer: str, score: int
+) -> None:
+    monkeypatch.setattr(ai, "re", launch.StrictRatingRe())
+    backend, _ = _backend(kind, answer)
+    assert backend.evaluate(_listing(), *_configs()).score == score
+
+
+def test_unmatched_rating_line_warns_once_without_text(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(launch, "_rating_warned", False)
+    proxy = launch.StrictRatingRe()
+    with caplog.at_level(logging.WARNING, logger="monitor"):
+        assert proxy.match(launch.AIMM_RATING_PATTERN, "Rating 4: fine") is not None
+        assert proxy.match(launch.AIMM_RATING_PATTERN, "no score here") is None  # aimm: no match
+        assert proxy.match(launch.AIMM_RATING_PATTERN, "> Rating 5: secret-seller-text") is None
+        assert proxy.match(launch.AIMM_RATING_PATTERN, "Ratings 3: more") is None
+    msgs = [r.getMessage() for r in caplog.records]
+    assert len(msgs) == 1
+    assert "rating line didn't match the expected format" in msgs[0]
+    assert "secret-seller-text" not in msgs[0] and "5" not in msgs[0]

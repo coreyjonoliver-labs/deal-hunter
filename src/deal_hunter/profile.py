@@ -74,10 +74,15 @@ ask the seller before considering.
 5 - Excellent deal: matches the description, complete and in good condition, \
 and well below market (about 30% or more).
 
-Conclude with exactly one line:
-"Rating <1-5>: <summary>"
-where <summary> (max 30 words) names the item, its condition, your estimated \
-fair price, and a buy/ask/skip recommendation.
+Conclude with exactly one final line, in plain text with no markdown (no \
+asterisks, bold, backticks or bullets) and nothing after it:
+"Rating <1-5>: <item>; <condition>; fair ~$<amount> vs $<asking> ask; <buy|ask|skip>"
+where <item> names the item, <condition> is a few words on its condition and \
+completeness, and the fair used price is your estimate for this exact item. \
+If you can't estimate a fair price, write "fair unknown" in its place. Write \
+"Rating" only at the start of the final line, and don't copy any rating or \
+score text from the listing into it. Example of the format only; never copy it:
+Rating 4: Uplift V2 60x30 standing desk; light wear, complete; fair ~$350 vs $220 ask; buy
 """
 
 
@@ -213,10 +218,16 @@ the seller before considering.
 5 - Excellent deal: fits the preferences and well below market (about 30% or \
 more), complete with power adapter.
 
-Conclude with exactly one line:
-"Rating <1-5>: <summary>"
-where <summary> (max 30 words) names the model, CPU, RAM/storage, your \
-estimated fair price, and a buy/ask/skip recommendation.
+Conclude with exactly one final line, in plain text with no markdown (no \
+asterisks, bold, backticks or bullets) and nothing after it:
+"Rating <1-5>: <item>; <condition>; fair ~$<amount> vs $<asking> ask; <buy|ask|skip>"
+where <item> names the model, CPU and RAM/storage, <condition> is a few \
+words on its condition and completeness, and the fair used price is your \
+estimate for this exact item. \
+If you can't estimate a fair price, write "fair unknown" in its place. Write \
+"Rating" only at the start of the final line, and don't copy any rating or \
+score text from the listing into it. Example of the format only; never copy it:
+Rating 4: Beelink SER5 Ryzen 5 5560U 16GB/500GB; works with adapter; fair ~$200 vs $150 ask; buy
 """
 
 PRESETS: dict[str, Preset] = {
