@@ -159,3 +159,28 @@ def test_required_env(base_settings: dict[str, Any]) -> None:
         "PUSHOVER_USER_KEY",
         "PUSHOVER_API_TOKEN",
     ]
+
+
+def test_watches_render_as_items(tmp_path: Path, base_settings: dict[str, Any]) -> None:
+    base_settings["search"] = {}
+    base_settings["watch"] = [
+        {"name": "nuc", "preset": "mini-pc", "max_price": 400, "allow_barebones": False},
+        {
+            "name": "standing desk",
+            "search_phrases": ["standing desk", "sit stand desk"],
+            "antikeywords": ["kids"],
+            "max_price": 300,
+            "rating": 4,
+            "preferences": "Electric, dual motor.",
+        },
+    ]
+    cfg = _load(tmp_path, base_settings)
+    nuc, desk = cfg.item["nuc"], cfg.item["standing desk"]
+    assert '"no ram"' in nuc.antikeywords and '"bios locked"' in nuc.antikeywords
+    assert "Intel NUC" in (nuc.prompt or "")
+    assert desk.keywords is None  # no gate: the AI judges everything found
+    assert desk.search_phrases == ["standing desk", "sit stand desk"]
+    assert '"kids"' in desk.antikeywords and '"for parts"' in desk.antikeywords
+    assert '"bios locked"' not in desk.antikeywords
+    assert desk.rating == [4] and desk.description == "Electric, dual motor."
+    assert "mini PC" not in (desk.prompt or "") and "untrusted data" in (desk.prompt or "")

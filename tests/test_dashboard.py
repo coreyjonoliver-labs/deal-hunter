@@ -42,10 +42,16 @@ def listing(id: str, title: str, location: str = "Springfield, IL", **kw: str) -
     }
 
 
-def put(cache: Cache, details: dict[str, str], score: int | None, comment: str = "") -> None:
+def put(
+    cache: Cache,
+    details: dict[str, str],
+    score: int | None,
+    comment: str = "",
+    watch: str = "nuc",
+) -> None:
     cache.set(("listing-details", details["post_url"].split("?")[0]), details)
     if score is not None:
-        hashed = Listing(**{**details, "name": "nuc"}).hash
+        hashed = Listing(**{**details, "name": watch}).hash
         cache.set(("ai-inquiries", "item", "market", hashed), {"score": score, "comment": comment})
 
 
@@ -83,14 +89,14 @@ def test_collect_joins_ratings_and_todays_filters(settings: Settings, home: Path
     assert by_id["1"].score == 5 and by_id["1"].notified and by_id["1"].comment == "Great deal"
     assert by_id["2"].score == 2 and not by_id["2"].notified
     assert by_id["3"].dropped == ["not local (Bloomington, IL)"]
-    assert by_id["4"].dropped == ["no brand/form-factor keyword"]
+    assert by_id["4"].dropped == ["no required keyword"]
     assert by_id["5"].score is None and not by_id["5"].dropped
     assert snap.counters == {"Search performed": 12}
 
 
 def test_views(settings: Settings, home: Path) -> None:
     results = dashboard.collect(settings, home, NOW).results
-    ids = lambda view: [r.id for r in dashboard.select(results, view, 3)]  # noqa: E731
+    ids = lambda view: [r.id for r in dashboard.select(results, view, settings)]  # noqa: E731
     assert ids("matches") == ["1"]
     assert ids("rated") == ["1", "2"]
     assert ids("all")[:3] == ["1", "2", "5"]  # filtered-out ones last
@@ -534,3 +540,37 @@ def test_server_speaks_http11_and_closes(server: int, method: str, path: str, bo
     status, _, rest = data.partition(b"\r\n")
     assert status.startswith(b"HTTP/1.1 ")
     assert b"\r\nConnection: close\r\n" in rest
+
+
+def test_watches_have_their_own_rating_and_filter(
+    base_settings: dict[str, Any], tmp_path: Path
+) -> None:
+    base_settings["search"] = {}
+    base_settings["watch"] = [
+        {"name": "nuc", "preset": "mini-pc", "max_price": 400},
+        {"name": "standing desk", "search_phrases": ["desk"], "max_price": 300, "rating": 5},
+    ]
+    base_settings["facebook"] = {"session_file": str(tmp_path / "fb.json")}
+    settings = parse_settings(base_settings)
+    home = tmp_path / "aimm"
+    home.mkdir()
+    with Cache(str(home)) as cache:
+        put(cache, listing("1", "Beelink SER5"), 4)
+        put(cache, listing("2", "Uplift standing desk"), 4, watch="standing desk")
+        put(cache, listing("3", "Fully Jarvis desk"), 5, watch="standing desk")
+        put(cache, listing("4", "Ikea desk lamp"), None)
+    snap = dashboard.collect(settings, home, NOW)
+    by_id = {r.id: r for r in snap.results}
+    # Unrated: the first watch whose filters it passes (not nuc: no keyword).
+    assert [by_id[i].watch for i in "1234"] == ["nuc"] + ["standing desk"] * 3
+    ids = lambda view, watch=None: [  # noqa: E731
+        r.id for r in dashboard.select(snap.results, view, settings, watch)
+    ]
+    assert ids("matches") == ["3", "1"]  # the desk rated 4 is under its watch's 5
+    assert ids("rated", "standing desk") == ["3", "2"]
+    page = dashboard.render_page(snap, settings, "rated", "standing desk")
+    assert 'href="/?view=matches&amp;watch=standing%20desk"' in page
+    assert "Fully Jarvis" in page and "Beelink" not in page
+    assert "at each watch's rating" in page
+    unknown = dashboard.render_page(snap, settings, "rated", "<script>")
+    assert "Beelink" in unknown and "<script>" not in unknown

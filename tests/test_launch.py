@@ -18,6 +18,9 @@ from deal_hunter import events, launch, profile
 from deal_hunter import session as fb_session
 from deal_hunter.session import Session, SessionError
 
+# What a mini-pc watch drops on.
+ANTIKEYWORDS = profile.COMMON_ANTIKEYWORDS + profile.MINI_PC_ANTIKEYWORDS
+
 TRIMMER = (
     "Toro 60V Revolution String Trimmer (battery not included)  "
     "New Toro string trimmer. More info: "
@@ -66,8 +69,8 @@ def test_real_listings_with_urls_still_pass(text: str) -> None:
 
 def test_antikeyword_inside_url_does_not_drop_listing() -> None:
     text = "Beelink EQ12 N100 16GB, photos: https://imgur.com/a/xWTBq9"
-    assert utils.is_substring(profile.ANTIKEYWORDS, text)  # "wtb" in the link
-    assert not launch.is_substring_without_urls(profile.ANTIKEYWORDS, text)
+    assert utils.is_substring(ANTIKEYWORDS, text)  # "wtb" in the link
+    assert not launch.is_substring_without_urls(ANTIKEYWORDS, text)
 
 
 @pytest.mark.parametrize(
@@ -75,7 +78,7 @@ def test_antikeyword_inside_url_does_not_drop_listing() -> None:
 )
 def test_zero_width_char_ends_a_link(sep: str) -> None:
     text = f"Intel NUC http://x{sep}for parts"
-    assert launch.is_substring_without_urls(profile.ANTIKEYWORDS, text)
+    assert launch.is_substring_without_urls(ANTIKEYWORDS, text)
 
 
 def test_list_of_texts() -> None:

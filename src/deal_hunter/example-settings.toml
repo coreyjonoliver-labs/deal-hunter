@@ -10,11 +10,18 @@ radius = 25                 # miles
 # seller_locations = ["Springfield", "Shelbyville"]
 
 [search]
-min_price = 40              # filters out $1 "placeholder" listings
-max_price = 400
 interval = "1h"             # random wait between interval and max_interval
 max_interval = "2h"
-include_tiny_pcs = false    # also watch ThinkCentre Tiny / OptiPlex Micro / EliteDesk Mini
+
+# One [[watch]] per thing you're looking for. Each search phrase is a page
+# load every interval, so keep the total small (Facebook throttles busy logins).
+[[watch]]
+name = "mini PC"            # the AI reads "A user wants to buy a <name>"
+# A preset brings tuned search phrases, keywords and AI prompt: mini-pc
+# (NUC, Beelink, Minisforum...) or tiny-pc (ThinkCentre Tiny, OptiPlex Micro...).
+preset = "mini-pc"
+min_price = 40              # filters out $1 "placeholder" listings
+max_price = 400
 allow_barebones = true      # false drops listings that say barebone / no RAM / no SSD
 # What you want, in plain words. The AI judges every listing against this.
 preferences = """\
@@ -22,12 +29,25 @@ Mini PC for a home server. Prefer Intel 8th gen or newer (or N100 and newer), \
 or AMD Ryzen 4000 series or newer. 16GB+ RAM preferred, upgradeable. Power \
 adapter must be included.\
 """
-# extra_antikeywords = ["celeron j4125"]
+# antikeywords = ["celeron j4125"]   # drop listings that mention any of these
+
+# Without a preset, give the search phrases yourself.
+# [[watch]]
+# name = "standing desk"
+# search_phrases = ["standing desk", "sit stand desk"]
+# # A listing must mention one of these to reach the AI. Leave it out and the
+# # AI rates everything the searches find (costs more, misses less).
+# keywords = ["desk"]
+# antikeywords = ["kids", "desk lamp"]
+# min_price = 50
+# max_price = 350
+# rating = 4                # notify at this rating or higher (default: ai.rating)
+# preferences = "Electric, dual motor, at least 60 inches wide, with memory presets."
 
 [ai]
 provider = "anthropic"      # anthropic | openai | ollama | none
 # model = "claude-haiku-4-5-20251001"
-rating = 3                  # notify for AI rating >= this (1-5)
+rating = 3                  # notify for AI rating >= this (1-5), unless a watch sets its own
 # base_url = "http://localhost:11434/v1"   # ollama only
 
 [notify]

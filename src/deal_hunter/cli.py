@@ -34,7 +34,7 @@ AIMM_HOME_CONFIG = Path.home() / ".ai-marketplace-monitor" / "config.toml"
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="deal-hunter",
-        description="NUC / mini-PC tuned front-end for ai-marketplace-monitor.",
+        description="Watch Facebook Marketplace for what you want, rated by AI.",
     )
     parser.add_argument(
         "-s", "--settings", type=Path, default=DEFAULT_SETTINGS, help="settings file"

@@ -1,29 +1,36 @@
 # deal-hunter
 
-Watches Facebook Marketplace near you for NUC-class mini PCs (Intel/ASUS NUC,
-Beelink, Minisforum, GMKtec, Geekom and similar) and sends you only the good ones.
+Watches Facebook Marketplace near you for the things you want (a mini PC, a
+standing desk, a road bike), has an AI rate every listing against what you
+asked for and what it's worth, and sends you only the good ones.
 
 It's a thin layer over
 [ai-marketplace-monitor](https://github.com/BoPeng/ai-marketplace-monitor)
 (pinned to 0.10.2). The monitor does the browsing, de-duplication and
-notifications. deal-hunter turns a short settings file into a NUC-tuned config
+notifications. deal-hunter turns a short settings file into a tuned config
 for it:
 
+- **Watches**: one `[[watch]]` per thing you're looking for, each with its own
+  search phrases, keywords, budget, plain-English preferences and the rating
+  that triggers a notification.
 - **Local pickup only**: searches use Facebook's local-pickup filter within your
   radius. Listings that say shipping-only or no-pickup are dropped, and the AI
   treats shipping-only or pay-before-pickup as a dealbreaker.
-- **Searches**: `nuc`, `beelink`, `minisforum`, `mini pc`. Optionally also
-  ThinkCentre Tiny, OptiPlex Micro and EliteDesk Mini (`include_tiny_pcs`).
-- **Keyword gate**: a listing must name a mini-PC brand or form factor. Listings
-  marked parts-only, broken, BIOS-locked, "looking for" or case-only are dropped
-  before any AI cost. Links (`http://`, `https://`, `www.`) in the listing are
-  ignored, so `nuc` hidden in a tracking URL doesn't let a string trimmer through.
-- **AI judge**: a mini-PC-specific prompt. The AI works out the model and CPU
-  from the model number (e.g. `NUC8i5BEH` → 8th-gen i5, `SER5` → Ryzen 5 5560U,
-  `EQ12` → N100) and checks for RAM, SSD and power adapter. It estimates a fair
-  used price, compares it to the asking price and looks for scam signals. Each
-  notification ends with a summary like
-  `Rating 4: NUC11 i5-1135G7, 16GB/512GB, fair ~$220 vs $150 ask — buy`.
+- **Filters before any AI cost**: listings marked for-parts, not working,
+  "want to buy" or shipping-only are dropped, plus your own antikeywords. A
+  watch with `keywords` also drops listings that mention none of them. Links
+  (`http://`, `https://`, `www.`) in the listing are ignored, so a keyword
+  hidden in a tracking URL doesn't let an unrelated listing through.
+- **AI judge**: the AI identifies exactly what's listed, checks it's the item
+  you want (not an accessory or a "wanted" post), and checks its condition and
+  completeness. It estimates a fair used price, compares it to the asking price
+  and looks for scam signals. Each notification ends with a summary like
+  `Rating 4: Uplift V2 60x30, light wear, fair ~$350 vs $220 ask — buy`.
+- **Presets**: tuned searches, keywords and prompts for one kind of item.
+  `mini-pc` (Intel/ASUS NUC, Beelink, Minisforum, GMKtec, Geekom and similar)
+  decodes model numbers (`NUC8i5BEH` → 8th-gen i5, `SER5` → Ryzen 5 5560U,
+  `EQ12` → N100) and checks for RAM, SSD and power adapter. `tiny-pc` covers
+  ThinkCentre Tiny, OptiPlex Micro and EliteDesk Mini.
 - **No secrets on disk**: the generated config only holds `${ENV_VAR}`
   placeholders, which ai-marketplace-monitor fills in at runtime.
 
@@ -41,8 +48,7 @@ Edit `deal-hunter.toml`:
    anything near you, and copy `XXX` from
    `facebook.com/marketplace/XXX/search?...`. This is a city slug like `seattle`
    or a numeric id.
-2. Set `radius`, the price range and `preferences` (plain English; the AI judges
-   listings against it).
+2. Add a `[[watch]]` for each thing you want (see below).
 3. Pick an AI provider and notifier, and export the environment variables
    they need:
 
@@ -65,6 +71,49 @@ provider uses `smtp.<your domain>` on port 587 (Gmail does; use an app password)
 `ntfy` is the easiest way to get phone alerts. Install the ntfy app, subscribe
 to a long random topic name, and set `NTFY_TOPIC` to that name. Anyone who knows
 the topic can read it, so treat it like a password.
+
+### Watches
+
+```toml
+[[watch]]
+name = "standing desk"          # the AI reads "A user wants to buy a <name>"
+search_phrases = ["standing desk", "sit stand desk"]
+keywords = ["desk"]             # optional: a listing must mention one
+antikeywords = ["kids", "lamp"] # optional: drop listings that mention any
+min_price = 50                  # optional, default 0
+max_price = 350
+rating = 4                      # optional, default ai.rating
+preferences = "Electric, dual motor, at least 60 inches wide."
+
+[[watch]]
+name = "mini PC"
+preset = "mini-pc"              # brings search phrases, keywords and prompt
+max_price = 400
+allow_barebones = false         # mini-pc / tiny-pc only
+```
+
+- `name` is up to 40 letters, digits, spaces, `-` or `_`. Ratings are cached
+  under it, so renaming a watch has the AI rate its listings again.
+- Each search phrase is a page load every interval. Keep the total across
+  all watches small: Facebook throttles logins that search a lot.
+- Without `keywords`, every listing the searches find (and the filters keep)
+  goes to the AI. That catches listings worded differently from your search,
+  at a small AI cost per listing. Keywords and antikeywords are plain phrases,
+  matched case-insensitively anywhere in the title or description.
+- Settings files from before watches (`min_price`, `max_price`,
+  `preferences`, `include_tiny_pcs`, `allow_barebones` and
+  `extra_antikeywords` under `[search]`, and no `[[watch]]`) still work: they
+  become a `mini-pc` watch named `nuc`, and a `tiny-pc` watch named `tiny_pc`
+  if `include_tiny_pcs` is set. Those are the item names the old versions
+  used, so cached ratings carry over. A file with `[[watch]]` tables can't
+  also use the old keys.
+
+### Coming from nuc-hunter
+
+deal-hunter is nuc-hunter renamed. A `nuc-hunter.toml` in the current
+directory still loads (with a note to rename it), and the next `run` moves
+`nuc-hunter-events.jsonl` to `deal-hunter-events.jsonl` so the dashboard's
+history carries over. The container image's home is now `/home/hunter`.
 
 ## Run
 
@@ -124,8 +173,9 @@ uv run deal-hunter web          # http://127.0.0.1:8740/
 A read-only page, refreshed every 5 minutes, with:
 
 - **Results**: rated listings with photo, price, town, AI rating and summary,
-  and whether you were notified. Tabs show matches (at or above your
-  `ai.rating`), everything rated, or everything fetched. Listings your
+  and whether you were notified. Tabs show matches (at or above the
+  watch's `rating`), everything rated, or everything fetched; with more
+  than one watch, you can also show one watch at a time. Listings your
   current filters would drop are hidden from the first two, so older ratings
   from before a settings change (say, a town you've since removed) don't
   show up as matches.
@@ -172,7 +222,7 @@ Host for probes.
 The `Dockerfile` builds one image for both `run` and `web` (CI publishes it to
 `ghcr.io/<owner>/deal-hunter:<version>` with signed build provenance). The tag
 is the package version and moves with every build of `main`, so pin the
-digest (`:0.1.0@sha256:…`). It runs as uid 1000, works with a read-only root
+digest (`:0.2.0@sha256:…`). It runs as uid 1000, works with a read-only root
 filesystem, and keeps nothing in the image: settings, keys and state come
 from outside. Under Kubernetes, run it as uid/gid 1000 with `fsGroup: 1000`
 so it can write its volumes.
@@ -241,14 +291,14 @@ docker run -d --name deal-hunter --read-only --cap-drop ALL --tmpfs /tmp \
   -v hunter-aimm:/home/hunter/.ai-marketplace-monitor -v hunter-session:/session \
   -v ~/.ai-marketplace-monitor/facebook-session.json:/seed/facebook-session.json:ro \
   -v "$PWD/deal-hunter.toml:/config/deal-hunter.toml:ro" -e ANTHROPIC_API_KEY \
-  ghcr.io/<owner>/deal-hunter:0.1.0 -s /config/deal-hunter.toml run \
+  ghcr.io/<owner>/deal-hunter:0.2.0 -s /config/deal-hunter.toml run \
   -o /work/build/aimm-config.toml \
   --session-seed /seed/facebook-session.json --wait-for-session 900 --restart-after 900
 
 docker run -d --name deal-hunter-web --read-only --cap-drop ALL --tmpfs /tmp \
   -v hunter-aimm:/home/hunter/.ai-marketplace-monitor:ro \
   -v "$PWD/deal-hunter.toml:/config/deal-hunter.toml:ro" -p 127.0.0.1:8740:8740 \
-  ghcr.io/<owner>/deal-hunter:0.1.0 -s /config/deal-hunter.toml \
+  ghcr.io/<owner>/deal-hunter:0.2.0 -s /config/deal-hunter.toml \
   web --host 0.0.0.0 --allow-host 127.0.0.1
 ```
 
@@ -273,9 +323,9 @@ you're logged in*, rotate the API key, then save a new session.
 
 ```sh
 uv run deal-hunter check "Beelink SER5 Ryzen 5 16GB 500GB" --price 180
-# [nuc] PASS (goes to AI)
+# [mini PC] PASS (goes to AI)
 uv run deal-hunter check "Intel NUC for parts" "no power" --price 30
-# [nuc] DROP: antikeyword "for parts"; price outside 40-400
+# [mini PC] DROP: antikeyword "for parts"; price outside 40-400
 ```
 
 `deal-hunter render` writes the config without starting anything, so you can

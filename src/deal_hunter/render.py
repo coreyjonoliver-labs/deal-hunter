@@ -11,7 +11,7 @@ from typing import Any
 import tomli_w
 
 from deal_hunter import profile
-from deal_hunter.settings import NOTIFIERS, Settings
+from deal_hunter.settings import NOTIFIERS, Settings, WatchSettings, quote_phrase
 
 USER = "me"
 MARKETPLACE = "facebook"
@@ -56,37 +56,7 @@ def build_config(settings: Settings) -> dict[str, Any]:
         marketplace["login_wait_time"] = 0
     marketplace["notify"] = USER
 
-    antikeywords = list(profile.ANTIKEYWORDS)
-    if not search.allow_barebones:
-        antikeywords += profile.BAREBONES_ANTIKEYWORDS
-    antikeywords += [_quote(k) for k in search.extra_antikeywords]
-
-    common: dict[str, Any] = {
-        "min_price": search.min_price,
-        "max_price": search.max_price,
-        "antikeywords": antikeywords,
-        "prompt": profile.NUC_PROMPT,
-        "rating_prompt": profile.NUC_RATING_PROMPT,
-        "rating": ai.rating,
-    }
-    if search.preferences:
-        common["description"] = search.preferences
-    if ai.provider == "none":
-        common["ai"] = []
-
-    items: dict[str, Any] = {
-        "nuc": {
-            "search_phrases": profile.NUC_SEARCH_PHRASES,
-            "keywords": profile.NUC_KEYWORDS,
-            **common,
-        }
-    }
-    if search.include_tiny_pcs:
-        items["tiny_pc"] = {
-            "search_phrases": profile.TINY_SEARCH_PHRASES,
-            "keywords": profile.TINY_KEYWORDS,
-            **common,
-        }
+    items = {watch.name: build_item(watch, settings) for watch in settings.watches}
 
     config: dict[str, Any] = {
         "marketplace": {MARKETPLACE: marketplace},
@@ -117,10 +87,33 @@ def build_config(settings: Settings) -> dict[str, Any]:
     return config
 
 
+def build_item(watch: WatchSettings, settings: Settings) -> dict[str, Any]:
+    """One watch as an aimm [item.*] table."""
+    preset = profile.PRESETS[watch.preset] if watch.preset else None
+    antikeywords = list(profile.COMMON_ANTIKEYWORDS)
+    if preset is not None:
+        antikeywords += preset.antikeywords
+        if not watch.allow_barebones:
+            antikeywords += preset.barebones_antikeywords
+    antikeywords += [quote_phrase(k) for k in watch.antikeywords]
+
+    item: dict[str, Any] = {"search_phrases": watch.search_phrases}
+    if watch.keywords:
+        item["keywords"] = watch.keywords
+    item |= {
+        "min_price": watch.min_price,
+        "max_price": watch.max_price,
+        "antikeywords": antikeywords,
+        "prompt": preset.prompt if preset else profile.GENERIC_PROMPT,
+        "rating_prompt": preset.rating_prompt if preset else profile.GENERIC_RATING_PROMPT,
+        "rating": watch.rating,
+    }
+    if watch.preferences:
+        item["description"] = watch.preferences
+    if settings.ai.provider == "none":
+        item["ai"] = []
+    return item
+
+
 def render(settings: Settings) -> str:
     return HEADER + tomli_w.dumps(build_config(settings), multiline_strings=True)
-
-
-def _quote(keyword: str) -> str:
-    """Treat a user-supplied antikeyword as a literal phrase, never an expression."""
-    return '"' + keyword.replace('"', "") + '"'

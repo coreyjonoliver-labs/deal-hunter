@@ -25,8 +25,8 @@ def drop_reasons(
 ) -> list[str]:
     """Why the monitor would drop a listing for item (a rendered [item.*] table)."""
     reasons = []
-    if not is_substring(item["keywords"], text):
-        reasons.append("no brand/form-factor keyword")
+    if item.get("keywords") and not is_substring(item["keywords"], text):
+        reasons.append("no required keyword")
     if is_substring(item["antikeywords"], text):
         hits = [k for k in item["antikeywords"] if is_substring(k, text)]
         reasons.append(f"antikeyword {', '.join(hits)}")
