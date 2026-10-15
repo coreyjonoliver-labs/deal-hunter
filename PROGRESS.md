@@ -4,6 +4,26 @@ A running, dated log of completed work. Append a new entry (newest at the top)
 each time a spec reaches `Complete` or a meaningful milestone lands. This is the
 project's memory between sessions — `session-start` surfaces the latest entry.
 
+## 2026-10-15 — investigate-search-failures
+
+- Finding: the smoke test's "Failed to get search results" errors weren't
+  failures. aimm 0.10.2 logs that error after **every** search (no
+  `if not found_listings`); the operator's log had 186 searches and 185 such
+  errors. Fixed upstream in 0.10.16 (a warning only on empty results) →
+  BACKLOG `bump-aimm`. "Failed to parse search results N listing" is real but
+  small (~1 tile per 9 searches skipped) and still recorded.
+- deal-hunter now drops that false message (only from aimm's
+  `facebook.search`, anchored — a listing title can't suppress real errors),
+  records `search_results` {watch, phrase_index, count} per phrase via a
+  `get_listings` patch, warns "No search results for watch '<w>' phrase #n"
+  only on zero, and replaces the Marketplace location with `[location]`
+  (token-boundary match) in every recorded message. `ops-metrics` now builds
+  its search counters on `search_results`.
+- Gate: 2 rounds, code-reviewer + security-auditor, 0 CRITICAL/HIGH; checks
+  enforced (398 tests, ruff, mypy). Not yet re-verified live: the next run
+  should show no "Failed to get search results" problems and
+  `search_results` events with counts.
+
 ## 2026-10-15 — live-watch-smoke-test
 
 - First live run of 0.2.0 with watches `nuc` (mini-pc preset, converted from

@@ -10,7 +10,7 @@ spec each.
   that it stays in step with the package version
 - [x] live-watch-smoke-test — run a non-mini-PC `[[watch]]` against Facebook end
   to end (operator-run: needs a saved session and an API key)
-- [ ] investigate-search-failures — the live run logged "Failed to get search
+- [x] investigate-search-failures — the live run logged "Failed to get search
   results" for 4 of 6 phrases and a "list index out of range" parse error in
   aimm 0.10.2; find out whether it's Facebook markup, throttling or the
   session, and fix or patch it in `launch.py` (also: that message puts the
@@ -22,6 +22,11 @@ spec each.
 
 ## Up Next
 
+- [ ] bump-aimm — ai-marketplace-monitor 0.10.2 → 0.10.16: fixes the
+  unconditional "Failed to get search results" upstream and adds login
+  recovery / search-radius handling, but changes every function deal-hunter
+  patches (login, search, goto_url, create_page, launch_browser); re-verify
+  each patch and the saved-session flow, then a live run
 - [ ] discord-deal-alerts — post matching listings to a Discord webhook as
   cards (photo, price, rating, AI summary, watch); spec Ready
 - [ ] ops-metrics — `/metrics` on its own port (heartbeat, search failures,

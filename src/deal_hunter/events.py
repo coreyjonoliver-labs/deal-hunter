@@ -4,7 +4,8 @@ aimm's own log file has no timestamps and mixes in full API requests, so
 ``launch.main`` adds ``EventRecorder`` to the monitor's logging. It appends
 one JSON line per useful event to ``deal-hunter-events.jsonl`` in aimm's home:
 aimm's structured events (browser start, searches, AI ratings, skips),
-token usage from each AI response, and warnings and errors.
+token usage from each AI response, per-phrase search result counts, and
+warnings and errors.
 
 Messages are redacted before they're written: aimm can log a notifier's
 token at WARNING ("Overriding ... with value ..."), so the values of secret-
@@ -42,11 +43,16 @@ _USAGE = {
     "cache_write_tokens": ("cache_creation_input_tokens",),
 }
 _MODEL = re.compile(r"\bmodel='([\w.:/-]+)'")
-_KINDS = {"search_summary", "browser_ready"}
-_FIELDS = {"item", "new_count", "engine", "sandbox"}
+_KINDS = {"search_summary", "browser_ready", "search_results"}
+_FIELDS = {"item", "new_count", "engine", "sandbox", "phrase_index", "count"}
 # Env vars whose values never go in the file.
 _SECRET_ENV = re.compile(r"(KEY|TOKEN|PASSWORD|SECRET|TOPIC|CHAT_ID|USERNAME|CREDENTIALS?)$")
 _OVERRIDE = re.compile(r"Overriding .* with value ")
+# aimm 0.10.2 logs this error after every phrase search, whatever it found
+# (tests/test_launch.py pins that). The truth is the search_results event.
+# Matched at the start of a message logged by FacebookMarketplace.search itself:
+# a seller can put the same words in a title that aimm logs elsewhere.
+_FALSE_SEARCH_FAILURE = re.compile(r"\[Search\] Failed to get search results for ")
 
 
 def secret_values() -> list[str]:
@@ -61,14 +67,26 @@ def plain(message: str) -> str:
 
 
 class EventRecorder(logging.Handler):
-    def __init__(self, path: Path, secrets: list[str] | None = None) -> None:
+    def __init__(
+        self, path: Path, secrets: list[str] | None = None, hidden: list[str] | None = None
+    ) -> None:
         super().__init__(level=logging.DEBUG)
         self.path = path
         self.secrets = secret_values() if secrets is None else secrets
+        # Not secrets, but not for the events file either (the Marketplace
+        # location). Matched without regard to case and only as a whole word
+        # (so a short slug can't mangle other words or numbers), longest first.
+        values = sorted((h for h in (hidden or []) if h.strip()), key=len, reverse=True)
+        self.hidden = values
+        self._hidden = [
+            re.compile(rf"(?<![a-z0-9]){re.escape(v)}(?![a-z0-9])", re.IGNORECASE) for v in values
+        ]
 
     def redact(self, text: str) -> str:
         for secret in self.secrets:
             text = text.replace(secret, "[redacted]")
+        for pattern in self._hidden:
+            text = pattern.sub("[location]", text)
         return text.replace(str(Path.home()), "~")  # no username in the page
 
     def emit(self, record: logging.LogRecord) -> None:
@@ -83,13 +101,21 @@ class EventRecorder(logging.Handler):
         ts = round(record.created, 3)
         aimm = getattr(record, "aimm", None)
         if isinstance(aimm, dict) and aimm.get("kind") in _KINDS:
-            fields = {k: _short(v) for k, v in aimm.items() if k in _FIELDS}
+            fields = {
+                k: _short(self.redact(v) if isinstance(v, str) else v)
+                for k, v in aimm.items()
+                if k in _FIELDS
+            }
             return {"ts": ts, "kind": aimm["kind"], **fields}
         message = record.getMessage()
         if message.startswith("[") and "[AI-Response]" in message[:40]:
             return ai_usage(message, ts)
         if record.levelno >= logging.WARNING:
-            if _OVERRIDE.search(message):
+            if _OVERRIDE.search(message) or (
+                record.module == "facebook"
+                and record.funcName == "search"
+                and _FALSE_SEARCH_FAILURE.match(plain(message))
+            ):
                 return None
             kind = "error" if record.levelno >= logging.ERROR else "warning"
             return {"ts": ts, "kind": kind, "message": _short(self.redact(plain(message)))}
@@ -153,10 +179,10 @@ def events_path(home: Path, *, migrate: bool = False) -> Path:
     return path
 
 
-def attach(logger: logging.Logger, path: Path) -> None:
-    """Record logger's events to path (once per logger)."""
+def attach(logger: logging.Logger, path: Path, hidden: list[str] | None = None) -> None:
+    """Record logger's events to path (once per logger), hiding the hidden values."""
     if not any(isinstance(h, EventRecorder) for h in logger.handlers):
-        logger.addHandler(EventRecorder(path))
+        logger.addHandler(EventRecorder(path, hidden=hidden))
 
 
 def _short(value: Any) -> Any:

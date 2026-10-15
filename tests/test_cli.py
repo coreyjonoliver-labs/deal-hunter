@@ -455,3 +455,13 @@ def test_undeletable_aimm_config_doesnt_stop_an_unattended_run(
     s = write_settings(tmp_path / "s.toml", f'session_file = "{fb}"\nrequire_session = true\n')
     assert main(["-s", str(s), "run", "-o", str(tmp_path / "c.toml")]) == 0
     assert "Ignoring" in capsys.readouterr().err and aimm_calls
+
+
+def test_recorded_problems_hide_the_location(capsys: pytest.CaptureFixture[str]) -> None:
+    from deal_hunter import cli, session
+    from deal_hunter.events import EVENTS_NAME, read_events
+
+    cli._record("Waiting near springfieldtest", ["springfieldtest"])
+    (event,) = read_events(session.AIMM_HOME / EVENTS_NAME)
+    assert event["message"] == "Waiting near [location]"
+    assert "springfieldtest" in capsys.readouterr().err  # the operator's own terminal

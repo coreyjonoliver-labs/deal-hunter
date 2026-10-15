@@ -142,8 +142,11 @@ and controls aimm's home directory; the dashboard has no login.
   problems; plain stdout for progress (`flush=True` in `run`).
 - Problems the dashboard should show go through `cli._record` (stderr + the
   events file). aimm's own logging is captured by `events.EventRecorder`, which
-  redacts secret-looking env values and drops aimm's "Overriding ... with value"
-  lines. Never log a token, the session, or a full AI request.
+  redacts secret-looking env values and the Marketplace location (`[location]`,
+  read from the rendered config by `launch.hidden_values`) and drops aimm's
+  "Overriding ... with value" and "Failed to get search results" lines (the
+  latter is logged after every search); `launch` records a `search_results`
+  event per phrase instead. Never log a token, the session, or a full AI request.
 
 ## Naming & structure
 
@@ -216,7 +219,10 @@ skill or `CLAUDE.md` covers, update this checklist too.
 2. Run the suite: the patch-point tests in `test_launch.py` and the config-load
    tests in `test_render.py` are the compatibility check. Re-read each patched
    upstream function for behavior changes, and re-check what aimm reads from its
-   home directory.
+   home directory. Among them: the unconditional "Failed to get search results"
+   error that `events.py` drops and the `get_listings` count in `launch.py`
+   replaces (`test_search_results_patch_points_still_exist`); a release that
+   logs it only for an empty search makes the drop unnecessary.
 3. Docs: the pinned version in README.
 
 ### Change the deploy manifests

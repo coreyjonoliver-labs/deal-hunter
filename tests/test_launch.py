@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import json
 import logging
 import os
 import types
@@ -116,6 +117,7 @@ def test_main_patches_then_runs_aimm(
         (marketplace.Marketplace, "create_page"),
         (facebook.FacebookMarketplace, "login"),
         (facebook.FacebookMarketplace, "search"),
+        (facebook.FacebookSearchResultPage, "get_listings"),
         (monitor.MarketplaceMonitor, "_launch_browser"),
         (monitor.MarketplaceMonitor, "__init__"),
     ]:
@@ -131,13 +133,16 @@ def test_main_patches_then_runs_aimm(
 
     monkeypatch.setattr(ai_marketplace_monitor.cli, "app", fake_app)
     sess = Session(tmp_path / "s.json", required=True)
-    launch.main(["--config", "c.toml"], sess, sandbox=False)
-    assert calls == [{"args": ["--config", "c.toml"], "prog_name": "ai-marketplace-monitor"}]
+    config = tmp_path / "c.toml"
+    config.write_text('[marketplace.facebook]\nsearch_city = "springfieldtest"\n')
+    launch.main(["--config", str(config)], sess, sandbox=False)
+    assert calls == [{"args": ["--config", str(config)], "prog_name": "ai-marketplace-monitor"}]
     assert seen == [launch.is_substring_without_urls]
     assert marketplace.Marketplace.goto_url is launch.goto_url_with_timeout
     assert marketplace.Marketplace.create_page is launch.create_page_with_session
     assert facebook.FacebookMarketplace.login is launch.login_with_session
     assert facebook.FacebookMarketplace.search is launch.search_with_session
+    assert facebook.FacebookSearchResultPage.get_listings is launch.get_listings_counted
     assert monitor.MarketplaceMonitor._launch_browser is launch.launch_browser
     assert monitor.MarketplaceMonitor.__init__ is launch.monitor_init
     assert launch.SESSION == sess and launch.SANDBOX is False
@@ -147,6 +152,7 @@ def test_main_patches_then_runs_aimm(
     for h in recorders:
         monitor_logger.removeHandler(h)
     assert [h.path for h in recorders] == [fb_session.AIMM_HOME / events.EVENTS_NAME]
+    assert [h.hidden for h in recorders] == [["springfieldtest"]]
     # The patched gate drops the trimmer and keeps a real listing.
     assert not seen[0](profile.NUC_KEYWORDS, TRIMMER)
     assert seen[0](profile.NUC_KEYWORDS, "Intel NUC8i5.BEH/16GB, https://x.io/a")
@@ -637,3 +643,277 @@ def test_home_config_ignored_only_when_unattended(
 def test_monitor_init_signature_is_unchanged() -> None:
     params = list(inspect.signature(launch._upstream_monitor_init).parameters)
     assert params == ["self", "config_files", "headless", "logger"]
+
+
+# --- What each phrase search returned -------------------------------------------
+
+
+def test_search_results_patch_points_still_exist() -> None:
+    # aimm 0.10.2 logs "Failed to get search results" after EVERY get_listings(),
+    # found or not. events.py drops that message and launch.py records the real
+    # count instead. A release that fixes it (0.10.16 logs "No search results"
+    # only for an empty result) makes the drop and the wrapper worth revisiting.
+    search = inspect.getsource(facebook.FacebookMarketplace.search)
+    after = search.split(".get_listings()", 1)[1]
+    log = after.split("counter.increment", 1)[0]
+    assert "self.logger.error(" in log and "Failed to get search results for" in log
+    assert "if not found_listings" not in search and "if found_listings" not in search
+    assert "for search_phrase in item_config.search_phrases:" in search
+    # One call per phrase: launch.py's phrase index counts calls.
+    assert search.count(".get_listings()") == 1
+    params = inspect.signature(facebook.FacebookSearchResultPage.get_listings).parameters
+    assert list(params) == ["self"]
+    assert "get_listings" not in vars(facebook.FacebookMarketplace)
+
+
+class FakeListing:
+    def __init__(self, n: int) -> None:
+        self.post_url = f"https://www.facebook.com/marketplace/item/{n}/"
+
+
+def search_config(phrases: list[str]) -> SimpleNamespace:
+    return SimpleNamespace(
+        name="mini_pc",
+        marketplace="facebook",
+        search_phrases=phrases,
+        searched_count=0,
+        **dict.fromkeys(
+            [
+                "condition", "date_listed", "delivery_method", "availability", "sort_by",
+                "search_city", "city_name", "radius", "currency", "max_price", "min_price",
+                "category",
+            ]
+        ),
+    )  # fmt: skip
+
+
+class SearchLoopMarket:
+    """Enough of FacebookMarketplace to run aimm's real search loop."""
+
+    search = launch.search_with_session
+
+    def __init__(self, logger: logging.Logger) -> None:
+        self.page = object()
+        self.translator = None
+        self.logger = logger
+        self.keyboard_monitor = None
+        self.hunter_logged_in = False
+        self.visited: list[str] = []
+        self.config = SimpleNamespace(
+            search_city=["springfieldtest"],
+            city_name=[None],  # aimm zips the cities with this, so it can't be empty
+            **dict.fromkeys(
+                [
+                    "condition", "date_listed", "delivery_method", "availability", "sort_by",
+                    "radius", "currency", "max_price", "min_price", "category",
+                ]
+            ),
+        )  # fmt: skip
+
+    def goto_url(self, url: str) -> None:
+        self.visited.append(url)
+
+    def check_listing(self, *args: Any, **kwargs: Any) -> bool:
+        return False
+
+
+@pytest.fixture
+def recorded(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Any:
+    """(logger, read) for a logger that records into a temp events file."""
+    monkeypatch.setattr(facebook.time, "sleep", lambda s: None)  # aimm sleeps 5 s a search
+    monkeypatch.setattr(
+        facebook.FacebookSearchResultPage, "get_listings", launch.get_listings_counted
+    )
+    path = tmp_path / events.EVENTS_NAME
+    logger = logging.getLogger("test-search-loop")
+    logger.setLevel(logging.DEBUG)
+    handler = events.EventRecorder(path, secrets=[], hidden=["springfieldtest"])
+    logger.addHandler(handler)
+    try:
+        yield logger, lambda: list(events.read_events(path))
+    finally:
+        logger.removeHandler(handler)
+
+
+def returning(monkeypatch: pytest.MonkeyPatch, counts: list[int]) -> None:
+    pages = iter(counts)
+    monkeypatch.setattr(
+        launch,
+        "_upstream_get_listings",
+        lambda self: [FakeListing(i) for i in range(next(pages))],
+    )
+
+
+def test_each_phrase_search_records_its_count(
+    monkeypatch: pytest.MonkeyPatch, recorded: Any
+) -> None:
+    logger, read = recorded
+    returning(monkeypatch, [3, 0])
+    market = SearchLoopMarket(logger)
+    # aimm's own search, unpatched, under launch's wrapper.
+    monkeypatch.setattr(launch, "_upstream_search", facebook.FacebookMarketplace.search)
+    assert list(market.search(search_config(["secret phrase one", "secret phrase two"]))) == []
+    got = read()
+    results = [e for e in got if e["kind"] == "search_results"]
+    assert [(e["item"], e["phrase_index"], e["count"]) for e in results] == [
+        ("mini_pc", 0, 3),
+        ("mini_pc", 1, 0),
+    ]
+    problems = [(e["kind"], e["message"]) for e in got if e["kind"] in ("warning", "error")]
+    assert problems == [("warning", "No search results for watch 'mini_pc' phrase #1")]
+    text = json.dumps(got)
+    assert "Failed to get search results" not in text
+    assert "secret phrase" not in text and "springfieldtest" not in text
+    assert len(market.visited) == 2  # both phrases were really searched
+
+
+def test_phrase_index_restarts_each_search(monkeypatch: pytest.MonkeyPatch, recorded: Any) -> None:
+    logger, read = recorded
+    returning(monkeypatch, [1, 1, 2, 0])
+    monkeypatch.setattr(launch, "_upstream_search", facebook.FacebookMarketplace.search)
+    market = SearchLoopMarket(logger)
+    config = search_config(["a", "b"])
+    list(market.search(config))
+    list(market.search(config))  # the next round
+    indexes = [e["phrase_index"] for e in read() if e["kind"] == "search_results"]
+    assert indexes == [0, 1, 0, 1]
+
+
+def test_listings_pass_through_the_wrapper(monkeypatch: pytest.MonkeyPatch) -> None:
+    listings = [FakeListing(1)]
+    monkeypatch.setattr(launch, "_upstream_get_listings", lambda self: listings)
+    page = SimpleNamespace(logger=logging.getLogger("test-wrapper"))
+    assert launch.get_listings_counted(page) is listings  # outside a search: untouched
+
+
+def test_wrapper_outside_a_search_records_nothing(
+    monkeypatch: pytest.MonkeyPatch, recorded: Any
+) -> None:
+    logger, read = recorded
+    returning(monkeypatch, [2])
+    launch.get_listings_counted(SimpleNamespace(logger=logger))
+    assert read() == []
+
+
+def test_search_state_is_cleared_after_a_failed_search(
+    monkeypatch: pytest.MonkeyPatch, recorded: Any
+) -> None:
+    logger, read = recorded
+
+    def broken(self: Any, item_config: Any) -> Any:
+        launch.get_listings_counted(SimpleNamespace(logger=logger))
+        raise RuntimeError("page gone")
+        yield  # pragma: no cover
+
+    returning(monkeypatch, [1, 1])
+    monkeypatch.setattr(launch, "_upstream_search", broken)
+    with pytest.raises(RuntimeError, match="page gone"):
+        list(SearchLoopMarket(logger).search(search_config(["a"])))
+    launch.get_listings_counted(SimpleNamespace(logger=logger))  # no watch now
+    assert [e["kind"] for e in read()] == ["search_results"]
+
+
+# --- The Marketplace location, read from the rendered config -----------------------
+
+
+def write_config(tmp_path: Path, body: str) -> Path:
+    path = tmp_path / "aimm.toml"
+    path.write_text(body)
+    return path
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        ('[marketplace.facebook]\nsearch_city = "springfieldtest"\n', ["springfieldtest"]),
+        ('[marketplace.facebook]\nsearch_city = ["a-town", "b-town"]\n', ["a-town", "b-town"]),
+    ],
+)
+def test_location_comes_from_the_config(tmp_path: Path, body: str, expected: list[str]) -> None:
+    path = write_config(tmp_path, body)
+    assert launch.hidden_values(["--config", str(path), "--no-webui"]) == expected
+    assert launch.hidden_values([f"--config={path}"]) == expected
+    assert launch.hidden_values(["-r", str(path)]) == expected
+
+
+def test_location_from_a_rendered_config(tmp_path: Path, base_settings: dict[str, Any]) -> None:
+    from deal_hunter.render import render
+    from deal_hunter.settings import parse_settings
+
+    base_settings["location"]["search_city"] = "springfieldtest"
+    path = write_config(tmp_path, render(parse_settings(base_settings)))
+    assert launch.hidden_values(["--config", str(path)]) == ["springfieldtest"]
+
+
+@pytest.mark.parametrize(
+    "args",
+    [[], ["--no-webui"], ["--config"], ["--config", "/nonexistent/aimm.toml"]],
+)
+def test_missing_config_hides_nothing_and_warns_once(args: list[str], capsys: Any) -> None:
+    assert launch.hidden_values(args) == []
+    assert capsys.readouterr().err.count("Marketplace location") == 1
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "not toml [",
+        "[marketplace.facebook]\nradius = 3\n",
+        "[marketplace.facebook]\nsearch_city = 5\n",
+        '[marketplace.facebook]\nsearch_city = ["ok", 5, ""]\n',
+    ],
+)
+def test_odd_config_values(tmp_path: Path, body: str, capsys: Any) -> None:
+    path = write_config(tmp_path, body)
+    got = launch.hidden_values(["--config", str(path)])
+    assert got == (["ok"] if '"ok"' in body else [])
+    assert ("Marketplace location" in capsys.readouterr().err) == (got == [])
+
+
+def test_config_symlink_is_not_followed(tmp_path: Path) -> None:
+    real = write_config(tmp_path, '[marketplace.facebook]\nsearch_city = "springfieldtest"\n')
+    link = tmp_path / "link.toml"
+    link.symlink_to(real)
+    assert launch.hidden_values(["--config", str(link)]) == []
+
+
+def test_phrase_index_restarts_for_each_city(
+    monkeypatch: pytest.MonkeyPatch, recorded: Any
+) -> None:
+    # aimm loops the cities around the phrases, so the indexes must not run on.
+    logger, read = recorded
+    returning(monkeypatch, [1, 1, 1, 1])
+    monkeypatch.setattr(launch, "_upstream_search", facebook.FacebookMarketplace.search)
+    market = SearchLoopMarket(logger)
+    market.config.search_city = ["one-town", "two-town"]
+    market.config.city_name = [None, None]
+    list(market.search(search_config(["a", "b"])))
+    assert [e["phrase_index"] for e in read() if e["kind"] == "search_results"] == [0, 1, 0, 1]
+
+
+def test_closing_a_search_early_clears_its_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_search(self: Any, item_config: Any) -> Any:
+        yield "listing"
+        yield "more"
+
+    monkeypatch.setattr(launch, "_upstream_search", fake_search)
+    results = SessionMarket(FakeBrowser()).search(SimpleNamespace(name="w", search_phrases=["a"]))
+    assert next(results) == "listing" and launch._Search.watch == "w"
+    results.close()
+    assert launch._Search.watch is None
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "marketplace = 5\n",
+        "[marketplace]\nfacebook = 5\n",
+        "x = " + "[" * 100_000 + "\n",
+    ],
+)
+def test_malformed_config_shapes_warn_instead_of_crashing(
+    tmp_path: Path, body: str, capsys: Any
+) -> None:
+    path = write_config(tmp_path, body)
+    assert launch.hidden_values(["--config", str(path)]) == []
+    assert capsys.readouterr().err.count("Marketplace location") == 1

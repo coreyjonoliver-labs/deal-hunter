@@ -192,7 +192,12 @@ A read-only page, refreshed every 5 minutes, with:
 - **Facebook login**: whether the saved session exists, when it was saved and
   when its login cookie expires.
 - **Recent problems**: the last warnings and errors, plus aimm's lifetime
-  counters and your settings.
+  counters and your settings. "No search results for watch 'x' phrase #n"
+  means that search phrase (counting from 0 in the watch's list) really came
+  back empty: an odd one is normal, every phrase failing for hours is not.
+  Your Marketplace location is shown as `[location]` in recorded messages.
+  (aimm 0.10.2 logs "Failed to get search results" after every search whether
+  or not it found anything; deal-hunter doesn't record it.)
 
 `/api/summary.json` has the same data as JSON, and `/healthz` answers `ok`.
 `web` runs separately from `run`, and only reads the monitor's files, so it

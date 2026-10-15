@@ -53,4 +53,34 @@ consolidates recurring ones into rules.
   module: "tests/test_deploy.py"
   tags: [release, ci, chicken-and-egg, digest-pinning]
   finding: "A check that pins a build artifact must not require the artifact for the same change that produces it: CI's image job runs only after tests pass, so a test demanding the new version's digest at bump time blocks every release. Pins may lag; forbid only pins ahead of the package."
+
+- date: 2026-10-15
+  source: "investigate-search-failures / src/deal_hunter/events.py:53 / security-auditor"
+  importance: 5
+  mechanizable: yes
+  scope: unclassified
+  category: security
+  module: "src/deal_hunter/events.py"
+  tags: [log-filtering, untrusted-text, suppression]
+  finding: "A filter that drops or reclassifies log records must key on the record's origin (module/funcName) and an anchored match, never an unanchored substring of the message: log messages embed seller-controlled text, so a listing title can otherwise suppress real errors."
+
+- date: 2026-10-15
+  source: "investigate-search-failures / src/deal_hunter/launch.py:241 / code-reviewer"
+  importance: 4
+  mechanizable: no
+  scope: unclassified
+  category: runtime-errors
+  module: "src/deal_hunter/launch.py"
+  tags: [aimm-patch, loop-structure]
+  finding: "When a patch infers loop position from call counts, mirror every enclosing loop of the upstream code (aimm loops cities around phrases), not just the innermost one."
+
+- date: 2026-10-15
+  source: "investigate-search-failures / src/deal_hunter/events.py:82 / code-reviewer + security-auditor"
+  importance: 4
+  mechanizable: yes
+  scope: unclassified
+  category: security
+  module: "src/deal_hunter/events.py"
+  tags: [redaction, word-boundary]
+  finding: "Redaction of short identifiers (slugs, ids) must match on token boundaries, not as bare substrings; otherwise a two-letter value garbles unrelated text and can hide what actually failed."
 ```
