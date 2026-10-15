@@ -6,6 +6,10 @@
 #   api.anthropic.com   the AI rating ([ai] provider = "anthropic")
 # Cilium's `*` matches within one label, never across a dot.
 #
+# toFQDNs allows the IPs a name resolves to, not the name itself: a host on
+# a shared CDN edge (some notifiers) admits every site on those IPs. For
+# such hosts, prefer an egress proxy that checks the TLS server name.
+#
 # What's left: a compromised browser can still post to Facebook (it holds a
 # logged-in session) and to the AI provider's API with an attacker's own
 # key. A spending limit on your key bounds cost, not exfiltration.

@@ -107,7 +107,9 @@ class EventRecorder(logging.Handler):
     def _trim(self) -> None:
         from deal_hunter.files import write_private
 
-        lines = self.path.read_text(encoding="utf-8").splitlines(keepends=True)
+        fd = os.open(self.path, os.O_RDONLY | os.O_NOFOLLOW)  # not a link swapped in
+        with os.fdopen(fd, encoding="utf-8") as f:
+            lines = f.read().splitlines(keepends=True)
         write_private(self.path, "".join(lines[len(lines) // 2 :]))
 
 

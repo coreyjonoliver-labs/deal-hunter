@@ -87,7 +87,8 @@ class Preset:
 
     search_phrases: list[str]
     keywords: list[str]
-    antikeywords: list[str] = field(default_factory=list)
+    # The whole list, in place of COMMON_ANTIKEYWORDS (include those).
+    antikeywords: list[str] = field(default_factory=lambda: list(COMMON_ANTIKEYWORDS))
     # Added unless the watch sets allow_barebones (presets that have it only).
     barebones_antikeywords: list[str] = field(default_factory=list)
     prompt: str = GENERIC_PROMPT
@@ -140,12 +141,25 @@ TINY_KEYWORDS: list[str] = [
     "prodesk",
 ]
 
-# On top of COMMON_ANTIKEYWORDS: a unit that won't boot, or only part of one.
+# The common ones plus a unit that won't boot, or only part of one, in the
+# order nuc-hunter rendered them (so legacy settings render byte-identically).
 MINI_PC_ANTIKEYWORDS: list[str] = [
+    '"for parts"',
+    '"parts only"',
+    '"not working"',
+    '"does not work"',
+    '"doesn\'t work"',
+    '"doesn’t work"',
     '"won\'t boot"',
     '"won’t boot"',
+    '"does not power on"',
+    '"won\'t power on"',
+    '"won’t power on"',
     '"bios locked"',
     '"bios password"',
+    "wtb",
+    '"want to buy"',
+    '"in search of"',
     '"case only"',
     '"chassis only"',
     '"motherboard only"',
@@ -153,6 +167,10 @@ MINI_PC_ANTIKEYWORDS: list[str] = [
     '"power supply only"',
     '"adapter only"',
     '"charger only"',
+    # Local pickup only: drop sellers who won't meet.
+    '"shipping only"',
+    '"no local pickup"',
+    '"pickup not available"',
 ]
 
 BAREBONES_ANTIKEYWORDS: list[str] = ["barebone", '"no ram"', '"no ssd"', '"no storage"']

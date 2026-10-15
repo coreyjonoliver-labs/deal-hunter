@@ -8,7 +8,7 @@ from ai_marketplace_monitor.utils import is_substring
 from deal_hunter import profile
 
 # What a mini-pc watch drops on.
-ANTIKEYWORDS = profile.COMMON_ANTIKEYWORDS + profile.MINI_PC_ANTIKEYWORDS
+ANTIKEYWORDS = profile.MINI_PC_ANTIKEYWORDS
 
 KEEP = [
     "Intel NUC8i5BEH 16GB RAM 256GB SSD",
@@ -115,3 +115,9 @@ def test_expected_answer_shape_parses_with_aimm_regex(answer: str) -> None:
     line = next(x for x in answer.split("\n") if "Rating" in x)
     matched = re.match(r".*Rating[^1-5]*([1-5])[:\s]*(.*)", line)
     assert matched and matched.group(1) in "45" and "fair" in matched.group(2)
+
+
+def test_mini_pc_antikeywords_include_the_common_ones() -> None:
+    assert set(profile.COMMON_ANTIKEYWORDS) <= set(profile.MINI_PC_ANTIKEYWORDS)
+    for preset in profile.PRESETS.values():
+        assert set(profile.COMMON_ANTIKEYWORDS) <= set(preset.antikeywords)

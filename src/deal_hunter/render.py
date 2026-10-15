@@ -7,6 +7,7 @@ out of their TOML value into new sections or keys.
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlparse
 
 import tomli_w
 
@@ -23,6 +24,30 @@ HEADER = """\
 # Secrets are ${ENV_VAR} placeholders expanded by ai-marketplace-monitor.
 
 """
+
+
+_AI_HOSTS = {"anthropic": "api.anthropic.com", "openai": "api.openai.com"}
+
+
+def secret_destinations(settings: Settings) -> list[str]:
+    """The settings-chosen hosts that receive a key or token, for `run` to show.
+
+    A settings file is all it takes to send the API key elsewhere (ai.base_url),
+    so a run from a planted or mistaken file should say where things go.
+    """
+    hosts = []
+    ai = settings.ai
+    if ai.base_url:
+        hosts.append(f"AI key -> {urlparse(ai.base_url).hostname}")
+    elif ai.provider in _AI_HOSTS:
+        hosts.append(f"AI key -> {_AI_HOSTS[ai.provider]}")
+    fields = settings.notify.fields
+    if "ntfy_server" in fields:
+        hosts.append(f"ntfy topic -> {urlparse(str(fields['ntfy_server'])).hostname}")
+    if "email" in fields:
+        domain = str(fields["email"]).rsplit("@", 1)[-1]
+        hosts.append(f"SMTP password -> {fields.get('smtp_server', f'smtp.{domain}')}")
+    return hosts
 
 
 def required_env(settings: Settings) -> list[str]:
@@ -90,9 +115,8 @@ def build_config(settings: Settings) -> dict[str, Any]:
 def build_item(watch: WatchSettings, settings: Settings) -> dict[str, Any]:
     """One watch as an aimm [item.*] table."""
     preset = profile.PRESETS[watch.preset] if watch.preset else None
-    antikeywords = list(profile.COMMON_ANTIKEYWORDS)
+    antikeywords = list(preset.antikeywords if preset else profile.COMMON_ANTIKEYWORDS)
     if preset is not None:
-        antikeywords += preset.antikeywords
         if not watch.allow_barebones:
             antikeywords += preset.barebones_antikeywords
     antikeywords += [quote_phrase(k) for k in watch.antikeywords]
