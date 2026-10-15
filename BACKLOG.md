@@ -23,17 +23,22 @@ spec each.
   cards (photo, price, rating, AI summary, watch); spec Ready. Alerting is
   scoped to "a product you want just got listed" (operator decision
   2026-10-15)
-
-- [ ] bump-aimm — ai-marketplace-monitor 0.10.2 → 0.10.16: fixes the
-  unconditional "Failed to get search results" upstream and adds login
-  recovery / search-radius handling, but changes every function deal-hunter
-  patches (login, search, goto_url, create_page, launch_browser, and since
-  then get_listings, AIResponse.to_cache, the ai-module rating `re.match`,
-  NotificationConfig.notify_all); re-verify each patch-point test and the
-  saved-session flow, then a live run
+- [ ] release-0-3-0 — publish 0.3.0 (Discord alerts, search signal, rating
+  summaries): version bump → main publishes + attests → strict verify → pin
+  the digest in `deploy/` in a follow-up
 
 ## Up Next
 
+- [ ] bump-aimm — ai-marketplace-monitor 0.10.2 → latest. Upstream fixes the
+  unconditional "Failed to get search results" and adds login recovery /
+  search-radius handling, but changes every function deal-hunter
+  patches (login, search, goto_url, create_page, launch_browser, and since
+  then get_listings, AIResponse.to_cache, the ai-module rating `re.match`,
+  NotificationConfig.notify_all); re-verify each patch-point test and the
+  saved-session flow, then a live run.
+  **Deferred (operator, 2026-10-15): not before** the newest aimm release is
+  at least 5 days old with no newer release in that window (per PyPI,
+  0.10.3–0.10.16 shipped Oct 5–14; re-check around Oct 22).
 - [ ] graduate-established — `/graduate` hardening for the established profile:
   branch protection requiring CI on `main`, CODEOWNERS, sandbox
   `failIfUnavailable` (operator applies settings/protection)
