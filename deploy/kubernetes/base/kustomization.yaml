@@ -1,0 +1,19 @@
+# deal-hunter on Kubernetes: the monitor and its dashboard in one pod.
+# Use it from your own overlay (see ../example) rather than editing it.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: deal-hunter
+labels:
+  - pairs:
+      app.kubernetes.io/name: deal-hunter
+    includeSelectors: false
+resources:
+  - namespace.yaml
+  - pvc.yaml
+  - deployment.yaml
+  - service.yaml
+  - networkpolicy.yaml
+images:
+  # The tag moves with every build of main: pin the digest in your overlay.
+  - name: ghcr.io/coreyjonoliver-labs/deal-hunter
+    newTag: 0.2.0

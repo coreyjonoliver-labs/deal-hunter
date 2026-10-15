@@ -1,0 +1,13 @@
+# The dashboard. It has no login: expose it only through a proxy that
+# requires one (an auth-gated Ingress), or use `kubectl port-forward`.
+apiVersion: v1
+kind: Service
+metadata:
+  name: deal-hunter
+spec:
+  selector:
+    app.kubernetes.io/name: deal-hunter
+  ports:
+    - name: http
+      port: 8740
+      targetPort: http

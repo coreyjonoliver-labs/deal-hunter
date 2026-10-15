@@ -1,0 +1,30 @@
+# An example overlay: copy this directory next to your own manifests,
+# point resources at the base (a local path, or a remote ref such as
+# https://github.com/coreyjonoliver-labs/deal-hunter//deploy/kubernetes/base?ref=<commit>),
+# put your settings in deal-hunter.toml, and create the two Secrets the
+# Deployment names (see base/deployment.yaml).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: deal-hunter
+resources:
+  - ../base
+components:
+  - ../components/kata           # drop if you have no Kata (or gVisor) runtime
+  - ../components/cilium-egress  # drop if your CNI isn't Cilium
+configMapGenerator:
+  - name: deal-hunter-config
+    files:
+      - deal-hunter.toml
+images:
+  - name: ghcr.io/coreyjonoliver-labs/deal-hunter
+    newTag: "0.2.0"
+    # digest: sha256:...   # pin it; the tag moves with every build of main
+patches:
+  # The host name your authenticating proxy serves the dashboard on.
+  - target:
+      kind: Deployment
+      name: deal-hunter
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/1/args/8
+        value: deal-hunter.example.com

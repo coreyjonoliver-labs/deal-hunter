@@ -227,6 +227,10 @@ filesystem, and keeps nothing in the image: settings, keys and state come
 from outside. Under Kubernetes, run it as uid/gid 1000 with `fsGroup: 1000`
 so it can write its volumes.
 
+`deploy/` has ready-made Compose and Kubernetes manifests (with optional
+Kata and Cilium egress components), and explains what each isolation choice
+protects: see [deploy/README.md](deploy/README.md).
+
 | | `run` | `web` |
 |---|---|---|
 | Settings file (pass `-s`) | read-only | read-only |

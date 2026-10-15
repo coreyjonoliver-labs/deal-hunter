@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: deal-hunter
+  labels:
+    # Everything here runs non-root with no capabilities and RuntimeDefault
+    # seccomp, so the strictest Pod Security level fits.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest

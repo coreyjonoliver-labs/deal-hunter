@@ -1,0 +1,184 @@
+# One pod, so both containers share the ReadWriteOnce volume (and the same
+# kernel, which SQLite's WAL needs for the dashboard to read the monitor's
+# cache coherently):
+#   prepare (init)  creates the volume's aimm/ and session/ directories
+#                   owner-only, and deletes an aimm/config.toml (aimm merges
+#                   one into every run; nothing legitimate writes it here).
+#   monitor         `deal-hunter run`: headless Chromium searches Marketplace,
+#                   the AI provider rates listings. The only container with
+#                   the API key, the session/ directory and the session seed
+#                   (--session-seed: copied onto session/ whenever the
+#                   Secret's content changes). --wait-for-session and
+#                   --restart-after keep it from exiting, so the pod stays
+#                   Ready and the dashboard can show what went wrong.
+#   web             `deal-hunter web`: the results/status dashboard on 8740.
+#                   aimm/ read-only, no session, no Secret.
+#
+# The browser runs without Chromium's sandbox (it can't start under
+# RuntimeDefault seccomp with no capabilities), so a browser exploit on a
+# seller's page runs as the monitor's user. Contain it: the kata component
+# (a microVM per pod) and an egress allowlist (the cilium component, or your
+# CNI's equivalent). See deploy/README.md.
+#
+# `web` is not a separate trust domain from `monitor`: they share the pod's
+# network namespace and uid, so a compromised monitor could take over port
+# 8740. Don't put the dashboard on a host that shares cookies with other
+# sensitive apps, and strip cookies at your proxy.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deal-hunter
+spec:
+  replicas: 1
+  # ReadWriteOnce volume and one Facebook login: never two pods at once.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: deal-hunter
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: deal-hunter
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        runAsNonRoot: true
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: prepare
+          image: ghcr.io/coreyjonoliver-labs/deal-hunter:0.2.0
+          command:
+            - python
+            - -c
+            - |
+              import os
+              from pathlib import Path
+              os.umask(0o077)
+              for d in (Path("/pvc/aimm"), Path("/pvc/session")):
+                  d.mkdir(exist_ok=True)
+                  d.chmod(0o700)
+              planted = Path("/pvc/aimm/config.toml")
+              if planted.exists() or planted.is_symlink():
+                  planted.unlink()
+                  print("Deleted aimm/config.toml (aimm would merge it into the run).")
+          securityContext: &securityContext
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 128Mi}
+          volumeMounts:
+            - {name: data, mountPath: /pvc}
+      containers:
+        - name: monitor
+          image: ghcr.io/coreyjonoliver-labs/deal-hunter:0.2.0
+          args:
+            - --settings
+            - /config/deal-hunter.toml
+            - run
+            - --output
+            - /work/build/aimm-config.toml
+            - --session-seed
+            - /seed/facebook-session.json
+            - --wait-for-session
+            - "900"
+            - --restart-after
+            - "900"
+          # API key and notifier tokens (README: "Setup"), e.g.
+          # kubectl create secret generic deal-hunter-credentials \
+          #   --from-literal=ANTHROPIC_API_KEY=...
+          envFrom:
+            - secretRef:
+                name: deal-hunter-credentials
+          securityContext: *securityContext
+          resources:
+            requests: {cpu: 100m, memory: 768Mi}
+            # Kata sizes the guest VM from the containers' limits.
+            limits: {memory: 2Gi}
+          volumeMounts:
+            - {name: data, mountPath: /home/hunter/.ai-marketplace-monitor, subPath: aimm}
+            - {name: data, mountPath: /session, subPath: session}
+            - {name: seed, mountPath: /seed, readOnly: true}
+            - {name: config, mountPath: /config, readOnly: true}
+            - {name: work, mountPath: /work}
+            - {name: tmp-monitor, mountPath: /tmp}
+        - name: web
+          image: ghcr.io/coreyjonoliver-labs/deal-hunter:0.2.0
+          # Requests naming any other Host get a 421 (DNS rebinding). Patch
+          # in the name your proxy serves the dashboard on.
+          args:
+            - --settings
+            - /config/deal-hunter.toml
+            - web
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8740"
+            - --allow-host
+            - deal-hunter.example.com
+          ports:
+            - {name: http, containerPort: 8740}
+          securityContext: *securityContext
+          # Exec probes over loopback: /healthz answers any Host, and a
+          # policy that keeps the node away from 8740 (see the cilium
+          # component) would block an httpGet probe.
+          livenessProbe: &probe
+            exec:
+              command: &healthz
+                - python
+                - -c
+                - import urllib.request; urllib.request.urlopen("http://127.0.0.1:8740/healthz", timeout=4)
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe: *probe
+          startupProbe:
+            exec:
+              command: *healthz
+            periodSeconds: 5
+            timeoutSeconds: 10
+            failureThreshold: 30
+          resources:
+            requests: {cpu: 25m, memory: 96Mi}
+            limits: {memory: 256Mi}
+          volumeMounts:
+            - {name: data, mountPath: /home/hunter/.ai-marketplace-monitor, subPath: aimm, readOnly: true}
+            - {name: config, mountPath: /config, readOnly: true}
+            - {name: tmp-web, mountPath: /tmp}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: deal-hunter-data
+        # Optional, so the pod starts before the seed exists: the monitor
+        # waits (--wait-for-session) and the dashboard shows why. A whole
+        # volume, not a subPath, so the kubelet refreshes it in place when
+        # the Secret changes and the monitor's next retry copies it.
+        # kubectl create secret generic deal-hunter-facebook-session \
+        #   --from-file=facebook-session.json=<the file `deal-hunter login` saved>
+        - name: seed
+          secret:
+            secretName: deal-hunter-facebook-session
+            optional: true
+            defaultMode: 288  # 0440 in decimal: root-owned, readable by fsGroup only
+        - name: config
+          configMap:
+            name: deal-hunter-config
+        # The generated aimm config and aimm's debug_*.html page dumps (a
+        # logged-in page): scratch, gone with the pod.
+        - name: work
+          emptyDir: {sizeLimit: 512Mi}
+        # One /tmp each: Chromium keeps its live profile (the logged-in
+        # cookies) under the monitor's /tmp, which the dashboard must not see.
+        - name: tmp-monitor
+          emptyDir: {sizeLimit: 1Gi}
+        - name: tmp-web
+          emptyDir: {sizeLimit: 64Mi}

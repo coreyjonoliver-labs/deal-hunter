@@ -1,0 +1,51 @@
+# Works with any NetworkPolicy-enforcing CNI.
+#
+# Ingress: the dashboard only, from namespaces you label
+# deal-hunter/dashboard-access=true (your ingress controller's). Narrow it to
+# the controller's pods in your overlay if you can: the dashboard has no
+# login, so the proxy in front of it is its only control.
+#
+# Egress: DNS, and HTTPS to public addresses only (not your LAN, the node or
+# cloud metadata). A plain NetworkPolicy can't match host names, so this
+# still lets a compromised browser reach any public HTTPS site. The
+# cilium-egress component replaces it with a Facebook + AI-provider
+# allowlist.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deal-hunter
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: deal-hunter
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              deal-hunter/dashboard-access: "true"
+      ports:
+        - {protocol: TCP, port: 8740}
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 100.64.0.0/10
+              - 169.254.0.0/16
+              - 127.0.0.0/8
+      ports:
+        - {protocol: TCP, port: 443}

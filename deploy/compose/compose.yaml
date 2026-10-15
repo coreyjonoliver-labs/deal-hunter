@@ -1,0 +1,87 @@
+# deal-hunter with Docker Compose: the monitor and its dashboard.
+#
+#   1. Put your settings in ./deal-hunter.toml (see ../kubernetes/example/
+#      deal-hunter.toml for an unattended setup) and your API key and
+#      notifier tokens in ./.env (ANTHROPIC_API_KEY=..., NTFY_TOPIC=...).
+#   2. Run `deal-hunter login` on a desktop and copy the saved session to
+#      ./facebook-session.json, readable by uid 1000.
+#   3. docker compose up -d, then open http://127.0.0.1:8740/.
+#
+# This limits what the containers can do on the host, not where the browser
+# can connect: Compose can't filter egress by host name. The browser runs
+# without Chromium's sandbox, so before running it unattended add a sandboxed
+# runtime (uncomment `runtime` below for gVisor, or use Kata) and an egress
+# filter (a firewall or proxy allowing Facebook and your AI provider; see
+# ../README.md).
+name: deal-hunter
+
+x-hardening: &hardening
+  image: ghcr.io/coreyjonoliver-labs/deal-hunter:0.2.0   # pin the @sha256 digest
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  user: "1000:1000"
+  # runtime: runsc
+
+services:
+  # aimm merges ~/.ai-marketplace-monitor/config.toml into every run, and
+  # nothing legitimate writes one there: delete a planted one before start.
+  prepare:
+    <<: *hardening
+    entrypoint: [python, -c]
+    command:
+      - |
+        from pathlib import Path
+        planted = Path("/home/hunter/.ai-marketplace-monitor/config.toml")
+        if planted.exists() or planted.is_symlink():
+            planted.unlink()
+            print("Deleted config.toml (aimm would merge it into the run).")
+    volumes:
+      - aimm:/home/hunter/.ai-marketplace-monitor
+
+  monitor:
+    <<: *hardening
+    depends_on:
+      prepare:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    command:
+      - --settings=/config/deal-hunter.toml
+      - run
+      - --output=/work/build/aimm-config.toml
+      - --session-seed=/seed/facebook-session.json
+      - --wait-for-session=900
+      - --restart-after=900
+    env_file: .env
+    tmpfs:
+      - /tmp
+      - /work:uid=1000,gid=1000
+    mem_limit: 2g
+    volumes:
+      - aimm:/home/hunter/.ai-marketplace-monitor
+      - session:/session
+      - ./facebook-session.json:/seed/facebook-session.json:ro
+      - ./deal-hunter.toml:/config/deal-hunter.toml:ro
+
+  web:
+    <<: *hardening
+    depends_on:
+      prepare:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    command:
+      - --settings=/config/deal-hunter.toml
+      - web
+      - --host=0.0.0.0
+      - --allow-host=127.0.0.1
+    tmpfs: [/tmp]
+    mem_limit: 256m
+    # The page has no login: loopback only, or behind a proxy that has one.
+    ports: ["127.0.0.1:8740:8740"]
+    volumes:
+      - aimm:/home/hunter/.ai-marketplace-monitor:ro
+      - ./deal-hunter.toml:/config/deal-hunter.toml:ro
+
+volumes:
+  aimm:
+  session:
