@@ -14,6 +14,8 @@ resources:
   - service.yaml
   - networkpolicy.yaml
 images:
-  # The tag moves with every build of main: pin the digest in your overlay.
+  # The tag moves with every build of main; the digest is what's pinned.
+  # Bump both together (see ../../README.md).
   - name: ghcr.io/coreyjonoliver-labs/deal-hunter
     newTag: 0.2.0
+    digest: sha256:adf697e701345c6b0bd28300f85fc3ebc2915ac20403d643c83fb80015bf8ae0

@@ -23,6 +23,56 @@ strip cookies on the way in (the pod runs a browser), and label the proxy's
 namespace `deal-hunter/dashboard-access=true` (or narrow the NetworkPolicy
 to the proxy's pods).
 
+## Pinning the image
+
+The image tag is the package version, and CI republishes it on every build of
+`main`, so the tag moves. The manifests here pin the tag **and** a `sha256:`
+digest, and the digest is what runs. `tests/test_deploy.py` fails if the
+kustomize base, `base/deployment.yaml`'s image lines, the Compose file, or
+the example overlay's own `images:` entry (if it has one) lack a digest,
+disagree on the tag or digest, or name a version newer than
+`pyproject.toml`'s. The pins may lag the package version, because a new
+version's image only exists once `main` has built it.
+
+To find the digest for a release, take the `pushed ...@sha256:...` line from
+the `build` workflow's log for that `main` build, or the digest shown on the
+package's page on GHCR. Then verify it was built by this repository's
+`main` build workflow before you trust it:
+
+```sh
+gh attestation verify \
+  oci://ghcr.io/coreyjonoliver-labs/deal-hunter@sha256:<digest> \
+  --repo coreyjonoliver-labs/deal-hunter \
+  --cert-identity https://github.com/coreyjonoliver-labs/deal-hunter/.github/workflows/build.yml@refs/heads/main \
+  --source-ref refs/heads/main \
+  --deny-self-hosted-runners
+```
+
+`--repo` alone accepts an attestation from any workflow on any branch of the
+repository; the other flags pin the workflow, the branch and the runner type.
+
+The tag is informational: the digest is what is pulled, and nothing checks
+that the tag points at it. Each digest is pinned in the base, the Compose
+file and the literal image lines of `base/deployment.yaml`; the example
+overlay inherits the base's pin. If your overlay has its own `images:`
+entry, set both `newTag` and `digest` in it: an entry that sets only
+`newTag` silently drops the digest. Check with
+`kustomize build <your overlay> | grep image:`; every line should end in
+`@sha256:...`.
+
+To move to a new version, publish it first (merge the version bump; `main`
+builds and attests it), then verify its digest as above and update the tag
+and digest in every file above in one follow-up change.
+
+Pins only move forward: the test can't tell a lagging pin from a rollback to
+an older (attested, possibly vulnerable) build, so a pinning change that
+lowers the tag should be rejected in review. Nothing in CI checks that a
+pinned digest is attested either, so whoever reviews a pinning change should
+re-run the strict `gh attestation verify` above on the new digest. A pinned
+digest stops being tagged on GHCR as soon as `main` rebuilds that version;
+don't let a package cleanup policy delete untagged versions that `deploy/`
+(or your own copy of it) still references.
+
 ## Isolation: do I need Kata?
 
 Not to make it work. A plain container (runc) runs deal-hunter fine. The

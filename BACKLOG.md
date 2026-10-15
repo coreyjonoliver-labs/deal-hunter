@@ -6,7 +6,7 @@ spec each.
 
 ## Current Focus
 
-- [ ] pin-image-digest — pin the published 0.2.0 digest in `deploy/` and test
+- [x] pin-image-digest — pin the published 0.2.0 digest in `deploy/` and test
   that it stays in step with the package version
 - [ ] live-watch-smoke-test — run a non-mini-PC `[[watch]]` against Facebook end
   to end (operator-run: needs a saved session and an API key)
@@ -17,8 +17,13 @@ spec each.
   branch protection requiring CI on `main`, CODEOWNERS, sandbox
   `failIfUnavailable` (operator applies settings/protection)
 - [ ] immutable-release-tags — CI republishes the version tag on every `main`
-  build; publish per-commit tags or refuse an existing version
-  (workflow change: operator-only)
+  build; publish per-commit tags or refuse an existing version; gate the
+  `image`/`attest` jobs on `refs/heads/main` (`workflow_dispatch` on a branch
+  can publish and attest today) (workflow change: operator-only)
+- [ ] verify-pins-in-ci — a CI step that runs the strict
+  `gh attestation verify` on the digest pinned in `deploy/`, so a pinning PR
+  can't merge an unattested or branch-built digest (workflow change:
+  operator-only)
 - [ ] chromium-sandbox-seccomp — Research: a `Localhost` seccomp profile that
   lets Chromium's sandbox start under runc, so `browser_sandbox = true` works in
   containers without a microVM

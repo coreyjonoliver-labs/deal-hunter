@@ -15,10 +15,10 @@ configMapGenerator:
   - name: deal-hunter-config
     files:
       - deal-hunter.toml
-images:
-  - name: ghcr.io/coreyjonoliver-labs/deal-hunter
-    newTag: "0.2.0"
-    # digest: sha256:...   # pin it; the tag moves with every build of main
+# The image tag and digest come from the base. If you override them here, set
+# both `newTag` and `digest` in the same `images:` entry: an entry that sets
+# only `newTag` silently drops the base's digest. Check with
+# `kustomize build . | grep image:` (every line should end in @sha256:...).
 patches:
   # The host name your authenticating proxy serves the dashboard on. This
   # replaces the whole list: keep it in step with base/deployment.yaml's
