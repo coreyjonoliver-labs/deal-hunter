@@ -1,0 +1,56 @@
+# Lessons log
+
+Immutable, append-only. One entry per material review finding; `/retrospect`
+consolidates recurring ones into rules.
+
+```yaml
+- date: 2026-10-15
+  source: "pin-image-digest / tests/test_deploy.py:25 / code-reviewer"
+  importance: 5
+  mechanizable: yes
+  scope: unclassified
+  category: build-test
+  module: "tests/test_deploy.py"
+  tags: [regex, manifest-parsing, kustomize]
+  finding: "A text check over a structured file must anchor on the entry it means (e.g. the images: item whose name is the image), not the first matching key anywhere, or an unrelated entry satisfies it."
+
+- date: 2026-10-15
+  source: "pin-image-digest / tests/test_deploy.py:68 / code-reviewer"
+  importance: 4
+  mechanizable: yes
+  scope: unclassified
+  category: build-test
+  module: "tests/test_deploy.py"
+  tags: [fail-closed, findall]
+  finding: "A consistency test that loops over matches must assert the expected number of matches; zero matches must fail, not pass vacuously."
+
+- date: 2026-10-15
+  source: "pin-image-digest / deploy/README.md:39 / security-auditor"
+  importance: 5
+  mechanizable: no
+  scope: unclassified
+  category: security
+  module: "deploy/README.md"
+  tags: [supply-chain, attestation, gh-attestation-verify]
+  finding: "Documented provenance checks must pin the signer workflow and ref (--cert-identity …/build.yml@refs/heads/main, --source-ref), not just --repo, which accepts any workflow on any branch of the repo."
+
+- date: 2026-10-15
+  source: "pin-image-digest / deploy/kubernetes/example/kustomization.yaml:18 / security-auditor"
+  importance: 5
+  mechanizable: yes
+  scope: unclassified
+  category: security
+  module: "deploy/kubernetes"
+  tags: [kustomize, digest-pinning, supply-chain]
+  finding: "A kustomize images: entry that sets newTag without digest strips an inherited digest; shipped overlays should either set both or omit the entry, and say so."
+
+- date: 2026-10-15
+  source: "pin-image-digest / tests/test_deploy.py:_check_ref / coordinator (missed by code-reviewer and security-auditor)"
+  importance: 7
+  mechanizable: no
+  scope: unclassified
+  category: process
+  module: "tests/test_deploy.py"
+  tags: [release, ci, chicken-and-egg, digest-pinning]
+  finding: "A check that pins a build artifact must not require the artifact for the same change that produces it: CI's image job runs only after tests pass, so a test demanding the new version's digest at bump time blocks every release. Pins may lag; forbid only pins ahead of the package."
+```

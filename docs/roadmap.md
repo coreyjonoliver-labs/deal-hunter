@@ -17,7 +17,7 @@ Objective: what `deploy/` ships is exactly what was reviewed and published.
 
 | Spec | Depends on | Status |
 |---|---|---|
-| [pin-image-digest](specs/pin-image-digest.md) | None | Ready |
+| [pin-image-digest](specs/pin-image-digest.md) | None | Complete |
 | immutable-release-tags | None | — |
 
 ## Phase 2 — Hardening

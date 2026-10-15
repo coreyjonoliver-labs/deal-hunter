@@ -173,7 +173,7 @@ touched:
 | `src/deal_hunter/example-settings.toml` | a settings key is added, renamed or its default changes |
 | `deploy/README.md` and `deploy/` | the image's mounts, users, ports, egress needs or isolation advice change |
 | `docs/specs/<spec>.md` | the spec's scope or acceptance criteria change during implementation |
-| `pyproject.toml` version | a user-visible change ships (the version is the image tag) |
+| `pyproject.toml` version | a user-visible change ships (the version is the image tag; pin its digest in `deploy/` in a follow-up once `main` publishes it) |
 
 **Self-referential rule:** if a change adds a new doc file or changes what this
 skill or `CLAUDE.md` covers, update this checklist too.
@@ -223,3 +223,12 @@ skill or `CLAUDE.md` covers, update this checklist too.
 1. Keep them generic: no personal domains, locations or cluster names.
 2. Validate with kustomize + kubeconform and `docker compose config`.
 3. Docs: `deploy/README.md`; keep the README's container section consistent.
+4. Release pins: a `pyproject.toml` version bump merges with the old pins
+   (the image only exists once `main` builds it). Then, in a follow-up
+   change, verify the new digest (strict `gh attestation verify`, see
+   `deploy/README.md`) and set the tag and digest in
+   `deploy/kubernetes/base/kustomization.yaml`, the three image lines of
+   `base/deployment.yaml` and `deploy/compose/compose.yaml`. The example
+   overlay inherits the base's pin; don't give it an `images:` entry.
+   `tests/test_deploy.py` fails on pins newer than the package, a missing
+   digest, or files that disagree.

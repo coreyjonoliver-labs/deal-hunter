@@ -53,7 +53,7 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: prepare
-          image: ghcr.io/coreyjonoliver-labs/deal-hunter:0.2.0
+          image: ghcr.io/coreyjonoliver-labs/deal-hunter:0.2.0@sha256:adf697e701345c6b0bd28300f85fc3ebc2915ac20403d643c83fb80015bf8ae0
           command:
             - python
             - -c
@@ -80,7 +80,7 @@ spec:
             - {name: data, mountPath: /pvc}
       containers:
         - name: monitor
-          image: ghcr.io/coreyjonoliver-labs/deal-hunter:0.2.0
+          image: ghcr.io/coreyjonoliver-labs/deal-hunter:0.2.0@sha256:adf697e701345c6b0bd28300f85fc3ebc2915ac20403d643c83fb80015bf8ae0
           args:
             - --settings
             - /config/deal-hunter.toml
@@ -112,7 +112,7 @@ spec:
             - {name: work, mountPath: /work}
             - {name: tmp-monitor, mountPath: /tmp}
         - name: web
-          image: ghcr.io/coreyjonoliver-labs/deal-hunter:0.2.0
+          image: ghcr.io/coreyjonoliver-labs/deal-hunter:0.2.0@sha256:adf697e701345c6b0bd28300f85fc3ebc2915ac20403d643c83fb80015bf8ae0
           # Requests naming any other Host get a 421 (DNS rebinding). Patch
           # in the name your proxy serves the dashboard on.
           args:
