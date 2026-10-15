@@ -19,7 +19,7 @@ Objective: what `deploy/` ships is exactly what was reviewed and published.
 |---|---|---|
 | [pin-image-digest](specs/pin-image-digest.md) | None | Complete |
 | [live-watch-smoke-test](specs/live-watch-smoke-test.md) | None | Complete |
-| investigate-search-failures | None | — |
+| [investigate-search-failures](specs/investigate-search-failures.md) | None | Complete |
 | rating-summary-format | None | — |
 | immutable-release-tags | None | — |
 

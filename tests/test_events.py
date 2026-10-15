@@ -231,3 +231,105 @@ def test_read_events_refuses_a_link(tmp_path: Path) -> None:
     link.symlink_to(target)
     assert list(events.read_events(link)) == []
     assert list(events.read_events(target))  # the same file, read directly
+
+
+FALSE_FAIL = "[red][Search][/red] Failed to get search results for intel nuc from springfieldtest"
+
+
+def search_record(message: str, level: int = logging.ERROR) -> logging.LogRecord:
+    """A record as aimm's FacebookMarketplace.search logs it (module/function as measured)."""
+    return logging.LogRecord("monitor", level, "/x/ai_marketplace_monitor/facebook.py", 524,
+                             message, None, None, func="search")  # fmt: skip
+
+
+@pytest.mark.parametrize("level", [logging.ERROR, logging.WARNING, logging.INFO, logging.DEBUG])
+def test_aimms_false_search_failure_is_dropped(recorder: events.EventRecorder, level: int) -> None:
+    # aimm 0.10.2 logs this after every search, whatever it found.
+    assert recorder.to_event(search_record(FALSE_FAIL, level)) is None
+
+
+def test_sentinel_text_from_a_listing_does_not_hide_real_errors(
+    recorder: events.EventRecorder,
+) -> None:
+    # A seller can put the sentinel in a title; aimm logs titles in other places.
+    title = "[Search] Failed to get search results for x from y"
+    message = f"[red][AI-Error][/red] failed to evaluate {title}: boom"
+    from_ai = logging.LogRecord(
+        "monitor", logging.ERROR, "/x/ai_marketplace_monitor/ai.py", 1, message, None, None,
+        func="evaluate",
+    )  # fmt: skip
+    event = recorder.to_event(from_ai)
+    assert event is not None and event["kind"] == "error"
+    # Same text from the search function, but not at the start of the message.
+    assert recorder.to_event(search_record(message)) is not None
+    # And the sentinel at the start, from another module.
+    assert recorder.to_event(record(FALSE_FAIL, logging.ERROR)) is not None
+
+
+def test_real_parse_error_is_still_recorded(recorder: events.EventRecorder) -> None:
+    message = (
+        "[red][Retrieve][/red] Failed to parse search results 2 listing: list index out of range"
+    )
+    event = recorder.to_event(record(message, logging.ERROR))
+    assert event is not None
+    assert event["kind"] == "error"
+    assert event["message"] == (
+        "[Retrieve] Failed to parse search results 2 listing: list index out of range"
+    )
+
+
+def test_search_results_event(recorder: events.EventRecorder) -> None:
+    extra = aimm_event("search_results", item="nuc", phrase_index=1, count=3, phrase="secret")
+    event = recorder.to_event(record("[Search] results", **extra))
+    assert event == {
+        "ts": event["ts"],
+        "kind": "search_results",
+        "item": "nuc",
+        "phrase_index": 1,
+        "count": 3,
+    }
+
+
+def test_location_is_redacted_from_messages(tmp_path: Path) -> None:
+    rec = events.EventRecorder(tmp_path / "e.jsonl", secrets=[], hidden=["SpringfieldTest"])
+    event = rec.to_event(record("[Search] x from springfieldtest, SPRINGFIELDTEST", logging.ERROR))
+    assert event is not None
+    assert event["message"] == "[Search] x from [location], [location]"
+
+
+def test_location_is_redacted_from_structured_fields(tmp_path: Path) -> None:
+    rec = events.EventRecorder(tmp_path / "e.jsonl", secrets=[], hidden=["springfieldtest"])
+    extra = aimm_event("search_summary", item="springfieldtest nuc", new_count=1)
+    event = rec.to_event(record("x", **extra))
+    assert event is not None and event["item"] == "[location] nuc"
+
+
+def test_empty_hidden_values_are_ignored(tmp_path: Path) -> None:
+    rec = events.EventRecorder(tmp_path / "e.jsonl", secrets=[], hidden=["", "  "])
+    event = rec.to_event(record("a b", logging.ERROR))
+    assert event is not None and event["message"] == "a b"
+
+
+def test_attach_passes_hidden_values(tmp_path: Path) -> None:
+    logger = logging.getLogger("test-attach-hidden")
+    events.attach(logger, tmp_path / "e.jsonl", hidden=["springfieldtest"])
+    (handler,) = logger.handlers
+    assert isinstance(handler, events.EventRecorder) and handler.hidden == ["springfieldtest"]
+    logger.removeHandler(handler)
+
+
+@pytest.mark.parametrize(
+    ("slug", "text", "expected"),
+    [
+        ("la", "Playwright la failed in la.", "Playwright [location] failed in [location]."),
+        ("98101", "id 1298101 and 98101", "id 1298101 and [location]"),
+        ("seattle", "/marketplace/Seattle/search?q=x", "/marketplace/[location]/search?q=x"),
+        ("seattle", "from seattle, WA", "from [location], WA"),
+        ("seattle", "seattleites", "seattleites"),
+    ],
+)
+def test_location_match_respects_word_edges(
+    tmp_path: Path, slug: str, text: str, expected: str
+) -> None:
+    rec = events.EventRecorder(tmp_path / "e.jsonl", secrets=[], hidden=[slug])
+    assert rec.redact(text) == expected

@@ -269,7 +269,8 @@ def _run(
                 f"Checking {seed} for a new one every {_minutes(wait_s)}."
                 if seed is not None
                 else f"Trying again in {_minutes(wait_s)}."
-            )
+            ),
+            [settings.location.search_city],
         )
         time.sleep(wait_s)
         if seed is not None:
@@ -282,7 +283,10 @@ def _run(
         if time.monotonic() - started > HEALTHY_RUN_S:
             restarts = 0
         delay = min(restart_s * 2**restarts, MAX_RESTART_DELAY_S)
-        _record(f"The monitor stopped ({first_line(e)}). Starting again in {_minutes(delay)}.")
+        _record(
+            f"The monitor stopped ({first_line(e)}). Starting again in {_minutes(delay)}.",
+            [settings.location.search_city],
+        )
         time.sleep(delay)
         os.environ[_RESTARTS] = str(restarts + 1)
     _restart()
@@ -299,15 +303,18 @@ def _restart() -> None:
     os.execv(sys.executable, sys.orig_argv)  # noqa: S606 — the same command again
 
 
-def _record(message: str) -> None:
-    """Print a problem and record it where `web` shows recent problems."""
+def _record(message: str, hidden: list[str] | None = None) -> None:
+    """Print a problem and record it where `web` shows recent problems.
+
+    hidden (the Marketplace location) is left out of the recorded copy only.
+    """
     from deal_hunter.events import EventRecorder, events_path
     from deal_hunter.session import AIMM_HOME
 
     print(f"deal-hunter: {message}", file=sys.stderr, flush=True)
     try:
         AIMM_HOME.mkdir(mode=0o700, exist_ok=True)
-        recorder = EventRecorder(events_path(AIMM_HOME, migrate=True))
+        recorder = EventRecorder(events_path(AIMM_HOME, migrate=True), hidden=hidden)
         recorder.write({"ts": time.time(), "kind": "error", "message": recorder.redact(message)})
     except OSError:
         pass

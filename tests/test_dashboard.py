@@ -614,3 +614,24 @@ def test_collect_reuses_filter_results(
     monkeypatch.setattr(filters, "drop_reasons", boom)
     again = dashboard.collect(settings, home, NOW, memo)
     assert [r.dropped for r in again.results] == [r.dropped for r in first.results]
+
+
+def test_problems_come_from_real_search_outcomes(settings: Settings, home: Path) -> None:
+    # What the monitor records now: a per-phrase result, a warning only for an
+    # empty one, and no "Failed to get search results" at all.
+    events(
+        home,
+        {"ts": NOW - 30, "kind": "search_results", "item": "nuc", "phrase_index": 0, "count": 3},
+        {"ts": NOW - 20, "kind": "search_results", "item": "nuc", "phrase_index": 1, "count": 0},
+        {
+            "ts": NOW - 19,
+            "kind": "warning",
+            "message": "No search results for watch 'nuc' phrase #1",
+        },
+    )
+    snap = dashboard.collect(settings, home, NOW)
+    problems = dashboard.summary(snap, settings)["problems"]
+    assert [p["message"] for p in problems["recent"]] == [
+        "No search results for watch 'nuc' phrase #1"
+    ]
+    assert problems["warnings_24h"] == 1 and problems["errors_24h"] == 0

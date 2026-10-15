@@ -32,8 +32,15 @@
    exploit could plant one (an [ai] base_url there would receive the API
    key). Deleting it at start can be raced, so aimm never reads it.
 
+6. Searches report what they found. aimm 0.10.2 logs "Failed to get search
+   results for <phrase> from <city>" as an error after *every* phrase search,
+   whether or not it found anything. events.py drops that message; here each
+   phrase search's real listing count is recorded as a ``search_results`` event
+   (watch, phrase index, count; never the phrase or the location), with a
+   warning when it is 0.
+
 ``deal-hunter run`` starts aimm through ``main`` in the same process, which
-applies all five. aimm is pinned, and tests/test_launch.py checks the patch points
+applies all six. aimm is pinned, and tests/test_launch.py checks the patch points
 still exist.
 
 This deliberately has no ``python -m`` entry: ``-m`` puts the current
@@ -46,12 +53,14 @@ from __future__ import annotations
 import logging
 import os
 import re
+import stat
+import sys
 import time
 from collections.abc import Iterator
 from logging import Logger
 from typing import Any
 
-from ai_marketplace_monitor.facebook import FacebookMarketplace
+from ai_marketplace_monitor.facebook import FacebookMarketplace, FacebookSearchResultPage
 from ai_marketplace_monitor.monitor import MarketplaceMonitor
 from ai_marketplace_monitor.utils import aimm_event, amm_home, is_substring
 from playwright.sync_api import Error as PlaywrightError
@@ -59,6 +68,11 @@ from playwright.sync_api import Error as PlaywrightError
 from deal_hunter import events
 from deal_hunter import session as fb_session
 from deal_hunter.session import Session, SessionError
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:  # pragma: no cover
+    import tomli as tomllib
 
 # Only links with a scheme or www.: bare "domain/path" patterns also match spec
 # text like "NUC8i5.BEH/16GB" or "3.5/4GHz" and would hide real listings.
@@ -112,6 +126,7 @@ SANDBOX = True
 _upstream_monitor_init = MarketplaceMonitor.__init__
 _upstream_login = FacebookMarketplace.login
 _upstream_search = FacebookMarketplace.search
+_upstream_get_listings = FacebookSearchResultPage.get_listings
 
 
 def create_page_with_session(self: Any, swap_proxy: bool = False) -> Any:
@@ -213,19 +228,58 @@ def login_with_session(self: Any) -> None:
         _save(self, session)
 
 
+class _Search:
+    """The watch being searched and how many phrases of it have come back.
+
+    aimm searches one watch at a time, so one module-level record is enough.
+    """
+
+    watch: str | None = None
+    phrases = 0  # in the watch
+    phrases_done = 0
+
+
+def get_listings_counted(self: Any) -> Any:
+    """FacebookSearchResultPage.get_listings, recording how many listings it found.
+
+    aimm calls it once per search phrase, for each city in turn, so within a
+    watch's search the phrase index is the number of calls so far, modulo the
+    watch's phrase count.
+    """
+    listings = _upstream_get_listings(self)
+    watch = _Search.watch
+    if watch is not None:
+        index = _Search.phrases_done % max(_Search.phrases, 1)
+        _Search.phrases_done += 1
+        logger = self.logger
+        if logger:
+            count = len(listings)
+            event = aimm_event("search_results", item=watch, phrase_index=index, count=count)
+            logger.info(f"[Search] {count} listings for phrase #{index}", extra=event)
+            if count == 0:
+                logger.warning(f"No search results for watch '{watch}' phrase #{index}")
+    return listings
+
+
 def search_with_session(self: Any, item_config: Any) -> Iterator[Any]:
     """FacebookMarketplace.search, checking the login survived it.
 
     Checked when the first listing arrives (the search page is loaded) and
     again at the end, so a required session stops the monitor before
-    logged-out results go to the AI and notifiers.
+    logged-out results go to the AI and notifiers. While it runs,
+    get_listings_counted knows which watch is being searched.
     """
     checked = False
-    for listing in _upstream_search(self, item_config):
-        if not checked:
-            checked = True
-            _check_login(self)
-        yield listing
+    _Search.watch, _Search.phrases_done = getattr(item_config, "name", None), 0
+    _Search.phrases = len(getattr(item_config, "search_phrases", None) or [])
+    try:
+        for listing in _upstream_search(self, item_config):
+            if not checked:
+                checked = True
+                _check_login(self)
+            yield listing
+    finally:
+        _Search.watch = None
     _check_login(self)
 
 
@@ -264,6 +318,54 @@ def _save(market: Any, session: Session) -> None:
             )
 
 
+_CONFIG_READ_BYTES = 1_000_000
+
+
+def _config_paths(args: list[str]) -> list[str]:
+    """The files named by --config / -r in aimm's arguments."""
+    paths = []
+    for i, arg in enumerate(args):
+        if arg in ("--config", "-r") and i + 1 < len(args):
+            paths.append(args[i + 1])
+        elif arg.startswith("--config="):
+            paths.append(arg.partition("=")[2])
+    return paths
+
+
+def hidden_values(args: list[str]) -> list[str]:
+    """The Marketplace location(s) in the rendered config named by args.
+
+    Recorded messages replace them with "[location]". The config is ours
+    (rendered by `run`), but it sits in aimm's home, so it is read like any
+    file there: not through a link, size-capped, values type-checked. If the
+    location can't be found, say so once: nothing is hidden beyond the usual
+    secret rules.
+    """
+    for path in _config_paths(args):
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            with os.fdopen(fd, "rb") as f:
+                if not stat.S_ISREG(os.fstat(fd).st_mode):
+                    continue
+                data = tomllib.loads(f.read(_CONFIG_READ_BYTES).decode("utf-8"))
+        except (OSError, ValueError, RecursionError):  # unreadable, a link, or not TOML
+            continue
+        section: Any = data
+        for key in ("marketplace", "facebook"):
+            section = section.get(key) if isinstance(section, dict) else None
+        city = section.get("search_city") if isinstance(section, dict) else None
+        values = [city] if isinstance(city, str) else city if isinstance(city, list) else []
+        found = [v for v in values if isinstance(v, str) and v.strip()]
+        if found:
+            return found
+    print(
+        "deal-hunter: couldn't read the Marketplace location from the config, so recorded "
+        "messages can't hide it.",
+        file=sys.stderr,
+    )
+    return []
+
+
 def main(args: list[str], session: Session | None = None, sandbox: bool = True) -> None:
     """Patch aimm, then run aimm's CLI with args. Exits via SystemExit."""
     global SESSION, SANDBOX
@@ -275,13 +377,16 @@ def main(args: list[str], session: Session | None = None, sandbox: bool = True) 
     fb_session.private_home()  # files aimm already created, before the umask
     # For `deal-hunter web`: aimm logs to the "monitor" logger.
     events.attach(
-        logging.getLogger("monitor"), events.events_path(fb_session.AIMM_HOME, migrate=True)
+        logging.getLogger("monitor"),
+        events.events_path(fb_session.AIMM_HOME, migrate=True),
+        hidden=hidden_values(args),
     )
     setattr(facebook, "is_substring", is_substring_without_urls)  # noqa: B010 — not re-exported
     marketplace.Marketplace.goto_url = goto_url_with_timeout  # type: ignore[method-assign]
     marketplace.Marketplace.create_page = create_page_with_session  # type: ignore[method-assign]
     facebook.FacebookMarketplace.login = login_with_session  # type: ignore[method-assign]
     facebook.FacebookMarketplace.search = search_with_session  # type: ignore[method-assign,assignment]
+    facebook.FacebookSearchResultPage.get_listings = get_listings_counted  # type: ignore[method-assign]
     monitor.MarketplaceMonitor._launch_browser = launch_browser  # type: ignore[method-assign]
     monitor.MarketplaceMonitor.__init__ = monitor_init  # type: ignore[method-assign]
     app(args=args, prog_name="ai-marketplace-monitor")

@@ -65,7 +65,8 @@ Naming follows a convention meant to be reusable by any periodic job: a
    - `deal_hunter_watch_last_success_timestamp_seconds{watch}` (gauge): the same,
      per watch.
    - `deal_hunter_searches_total{watch,outcome="ok"|"failed"}` (counter): phrase
-     searches by outcome.
+     searches by outcome, built on the `search_results` events
+     (`investigate-search-failures`): count > 0 is ok, 0 is failed.
    - `deal_hunter_listings{state="fetched"|"rated"|"filtered_out"|"matched"}`
      (gauge): the dashboard's counts.
    - `deal_hunter_ai_calls_total{model}`, `deal_hunter_ai_tokens_total{model,kind="input"|"output"|"cache_read"|"cache_write"}`,
@@ -90,10 +91,11 @@ Naming follows a convention meant to be reusable by any periodic job: a
    search phrase, the Marketplace location, seller towns, listing titles, URLs,
    AI text, or any secret.
 5. The monitor shall record structured events the metrics need and don't exist
-   yet: `search_failed` (watch, phrase index — not the phrase text, and never
-   the location aimm puts in its message) whenever aimm reports it couldn't get
-   or parse a phrase's results, `search_ok` per phrase that returned results,
-   and `notification` (method, outcome) for every notify attempt. Raw aimm
+   yet. Search outcomes are the `search_results` events that
+   `investigate-search-failures` adds (watch, phrase index, count; never the
+   phrase text or the location); aimm's "Failed to get search results" message
+   is logged after every search and is not a failure signal. This spec adds
+   `notification` (method, outcome) for every notify attempt. Raw aimm
    messages recorded as problems shall have the Marketplace location value
    replaced with `[location]`.
 6. Computing `/metrics` shall reuse the dashboard's `SnapshotCache` (no
@@ -133,9 +135,9 @@ When /metrics is scraped
 Then deal_hunter_searches_total{outcome="failed"} sums to 2 and {outcome="ok"} to 4
 And deal_hunter_last_success_timestamp_seconds equals that round's end
 
-Given aimm logs "Failed to get search results for <phrase> from <location>"
-When it is recorded
-Then the events file holds a search_failed event with the watch and phrase index, and no phrase text or location
+Given a search_results event with count 0 for a watch and phrase index
+When /metrics is scraped
+Then deal_hunter_searches_total{outcome="failed"} counts it, with no phrase text or location
 
 Given a session whose login cookie expires in 2 days
 When the rules are evaluated (promtool test)
@@ -156,7 +158,7 @@ Then none of the phrases, the location or any secret appear
 |---|---|---|
 | `src/deal_hunter/metrics.py` | create | Snapshot + events → exposition text; no third-party dependency |
 | `src/deal_hunter/dashboard.py` | edit | metrics listener (own server, `/metrics` only), shares `SnapshotCache` |
-| `src/deal_hunter/events.py` | edit | `search_ok` / `search_failed` / `notification` events; location redaction |
+| `src/deal_hunter/events.py` | edit | `notification` events (search outcomes come from `search_results`) |
 | `src/deal_hunter/launch.py` | edit | where aimm's search/notify outcomes are observed (patch points with tests) |
 | `src/deal_hunter/cli.py` | edit | `web --metrics-port/--metrics-host` |
 | `tests/test_metrics.py` | create | exposition, values, label hygiene; parsed with a text-format parser in tests |
@@ -191,7 +193,7 @@ Then none of the phrases, the location or any secret appear
 1. `web` started before the monitor ever ran → heartbeat absent; the `absent()`
    leg makes the stall rule fire after its `for:` window, not stay silent.
 2. Events file trimmed → counters drop; `increase()` treats it as a reset.
-3. Old events from before this spec (no `search_ok`/`search_failed`) → search
+3. Old events from before this spec (no `search_results`) → search
    counters start at the first new event; the heartbeat falls back to
    `search_summary` events.
 4. Anonymous mode → no session series at all, so the session rules (which
