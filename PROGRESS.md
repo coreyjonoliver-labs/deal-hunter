@@ -4,6 +4,21 @@ A running, dated log of completed work. Append a new entry (newest at the top)
 each time a spec reaches `Complete` or a meaningful milestone lands. This is the
 project's memory between sessions — `session-start` surfaces the latest entry.
 
+## 2026-10-15 — live-watch-smoke-test
+
+- First live run of 0.2.0 with watches `nuc` (mini-pc preset, converted from
+  the operator's legacy settings) and `standing desk` (generic prompt).
+  Operator-run; results in `docs/specs/live-watch-smoke-test.md`.
+- Works: both watches searched (116 listings), 87 filtered before the AI,
+  15 AI calls (~$0.05), sensible generic-prompt ratings (wrong product types
+  rated 1, a too-narrow desk rejected on the stated width), dashboard watch
+  filter and tags, no API key in the events file.
+- Found: aimm search failures on 4 of 6 phrases plus a parse error →
+  `investigate-search-failures`; summaries missing the fair price and ending
+  in stray `**` → `rating-summary-format`. Both in Current Focus.
+- Gate: doc-only (recorded results); review dispatch skipped with reason,
+  checks enforced (357 tests, ruff, mypy).
+
 ## 2026-10-15 — pin-image-digest
 
 - `deploy/` (kustomize base, `base/deployment.yaml` ×3, compose) pins
