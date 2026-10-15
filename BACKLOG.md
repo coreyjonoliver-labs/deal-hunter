@@ -22,6 +22,13 @@ spec each.
 
 ## Up Next
 
+- [ ] discord-deal-alerts — post matching listings to a Discord webhook as
+  cards (photo, price, rating, AI summary, watch); spec Ready
+- [ ] ops-metrics — `/metrics` on its own port (heartbeat, search failures,
+  session expiry, AI spend, notifications) + generic ServiceMonitor and alert
+  rules in `deploy/`; spec Ready
+- [ ] otel-tracing — OTLP traces per search cycle with an attribute allowlist,
+  off by default (depends on ops-metrics); spec Ready
 - [ ] graduate-established — `/graduate` hardening for the established profile:
   branch protection requiring CI on `main`, CODEOWNERS, sandbox
   `failIfUnavailable` (operator applies settings/protection)
