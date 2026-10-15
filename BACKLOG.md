@@ -19,6 +19,10 @@ spec each.
   the prompt asks for, and some end in a stray `**` (markdown leaking into the
   comment); tighten the prompts and/or clean the comment before display and
   notification
+- [ ] discord-deal-alerts — post matching listings to a Discord webhook as
+  cards (photo, price, rating, AI summary, watch); spec Ready. Alerting is
+  scoped to "a product you want just got listed" (operator decision
+  2026-10-15)
 
 ## Up Next
 
@@ -27,13 +31,6 @@ spec each.
   recovery / search-radius handling, but changes every function deal-hunter
   patches (login, search, goto_url, create_page, launch_browser); re-verify
   each patch and the saved-session flow, then a live run
-- [ ] discord-deal-alerts — post matching listings to a Discord webhook as
-  cards (photo, price, rating, AI summary, watch); spec Ready
-- [ ] ops-metrics — `/metrics` on its own port (heartbeat, search failures,
-  session expiry, AI spend, notifications) + generic ServiceMonitor and alert
-  rules in `deploy/`; spec Ready
-- [ ] otel-tracing — OTLP traces per search cycle with an attribute allowlist,
-  off by default (depends on ops-metrics); spec Ready
 - [ ] graduate-established — `/graduate` hardening for the established profile:
   branch protection requiring CI on `main`, CODEOWNERS, sandbox
   `failIfUnavailable` (operator applies settings/protection)
@@ -51,6 +48,16 @@ spec each.
 
 ## Later
 
+- [ ] ops-metrics — `/metrics` on its own port (heartbeat, search failures,
+  session expiry, AI spend, notifications) + generic ServiceMonitor and alert
+  rules in `deploy/`; spec Ready, deferred: alerting is scoped to new listings
+  for now (a stalled monitor shows only on the dashboard's status card)
+- [ ] otel-tracing — OTLP traces per search cycle with an attribute allowlist,
+  off by default (depends on ops-metrics); spec Ready, deferred with it
+- [ ] config-hardening — unknown keys rejected in every settings table (not
+  just `[[watch]]`), a `schema_version` with migrations (legacy `[search]` as
+  the first), `deal-hunter config check`, a published JSON Schema; move
+  `facebook.session_file` to a flag/env (it's process wiring, not intent)
 - [ ] dashboard-own-pod — run `web` in its own pod so it's a separate trust
   domain from the monitor (needs the cache shared without SQLite WAL across
   kernels)

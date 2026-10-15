@@ -3,7 +3,8 @@ name: deal-hunter-conventions
 description: >-
   Detailed engineering conventions for deal-hunter (Python, uv, ruff, mypy,
   pytest) — testing, linting and formatting, type checking, error handling,
-  the security rules for secrets, untrusted listing text and the unsandboxed
+  the configuration model (what belongs in the TOML vs env vs flags vs a
+  database), the security rules for secrets, untrusted listing text and the unsandboxed
   browser, logging, naming, the documentation-maintenance checklist, and
   step-by-step procedures (add a setting, add a preset, bump aimm, change the
   deploy manifests). Load this before implementing or reviewing any change; it
@@ -95,6 +96,32 @@ a scratch copy of `deploy/compose/` with empty `.env`, `deal-hunter.toml` and
   restart; each carries `# noqa: BLE001` and the reason.
 - **Fail closed:** a check that can't decide denies (e.g. an unreadable session
   stops an unattended run; a symlinked events file reads as empty).
+
+## Configuration model
+
+Every knob or stored value has exactly one home. Classify before adding one:
+
+| Category | Examples | Home | Rule |
+|---|---|---|---|
+| **Intent** — what deal-hunter should do | watches, presets, budgets, rating thresholds, AI provider/model, notification methods, search schedule, alert thresholds | `deal-hunter.toml` (git; a ConfigMap in Kubernetes) | Validated strictly at load; changed only by editing the file; nothing at runtime writes it |
+| **Secrets** | API keys, notifier tokens, webhook URLs | environment variables (from the deployment's secret store) | Never in the TOML, the rendered config, a database, logs or metrics |
+| **Process wiring** — how this instance runs | ports, bind hosts, `--allow-host`, file paths, OTLP endpoint | CLI flags and env vars, set in the deployment manifests | Not in the TOML: the same settings file should work on a desktop and in a pod |
+| **Data** — what happened, or a person's reaction to it | aimm's cache (listings, ratings, notified), the events file, the Facebook session; later: dismissals, mutes, price history | stores owned by the code that writes them; a deal-hunter SQLite database only once a feature needs one | Never hand-edited; system-produced data is rebuildable |
+
+Boundaries:
+- Runtime data may only **narrow** behavior (dismiss a listing, mute a watch)
+  and must **expire or be visible** on the dashboard. It never adds or changes
+  watches, thresholds or routing — that would make git stop describing what
+  the system does.
+- Don't add a database speculatively: it arrives with the first feature that
+  needs it, in that feature's spec, with migrations. deal-hunter never writes
+  into aimm's cache.
+- The first runtime input channel is the dashboard. That makes `web`
+  read-write (a writable volume separate from aimm's home, CSRF protection, an
+  identity from the authenticating proxy), so the spec that adds it owns that
+  threat-model change and gets the security audit.
+- `facebook.session_file` is process wiring sitting in the TOML for historical
+  reasons (BACKLOG `config-hardening`); don't add more like it.
 
 ## Security
 
@@ -198,6 +225,9 @@ skill or `CLAUDE.md` covers, update this checklist too.
    security surface. Add a `PROGRESS.md` line.
 
 ### Add a settings key
+0. Classify it first (see "Configuration model"): only *intent* goes in the
+   TOML; a secret is an env var; process wiring is a flag/env; data is not a
+   setting at all.
 1. Add the field to the frozen dataclass in `settings.py` and parse it with the
    `_str` / `_int` / `_bool` / `_str_list` helpers (they reject `${` and wrong
    types); for a `[[watch]]` key, add it to `WATCH_KEYS` too.
