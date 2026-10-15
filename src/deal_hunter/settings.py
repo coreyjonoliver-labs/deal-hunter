@@ -1,8 +1,9 @@
 """Load and validate the user's deal-hunter.toml.
 
-The settings file holds only non-secret preferences (location, budget, which
-notifier to use). Credentials never live here: the rendered config refers to
-them as ${ENV_VAR} placeholders that ai-marketplace-monitor expands at runtime.
+The settings file holds only non-secret preferences (location, what to watch
+for and at what price, which notifier to use). Credentials never live here:
+the rendered config refers to them as ${ENV_VAR} placeholders that
+ai-marketplace-monitor expands at runtime.
 """
 
 from __future__ import annotations
@@ -13,6 +14,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+
+from deal_hunter.profile import PRESETS
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -59,6 +62,34 @@ _INTERVAL_RE = re.compile(r"^\d+\s*[smhd](\s+\d+\s*[smhd])*$")
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _URL_RE = re.compile(r"^https?://[^\s]+$")
 _HOST_RE = re.compile(r"^[A-Za-z0-9.-]+$")
+# A watch's name is aimm's item name: the AI reads "A user wants to buy a
+# <name>", and it's part of every cached rating's key, so renaming a watch
+# rates its listings again.
+_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _-]{0,39}$")
+MAX_WATCHES = 20
+MAX_PHRASES = 10
+
+WATCH_KEYS = {
+    "name",
+    "preset",
+    "search_phrases",
+    "keywords",
+    "antikeywords",
+    "min_price",
+    "max_price",
+    "preferences",
+    "rating",
+    "allow_barebones",
+}
+# [search] keys from before [[watch]] existed: a single mini-PC watch.
+LEGACY_SEARCH_KEYS = {
+    "min_price",
+    "max_price",
+    "include_tiny_pcs",
+    "allow_barebones",
+    "preferences",
+    "extra_antikeywords",
+}
 
 
 @dataclass(frozen=True)
@@ -70,14 +101,26 @@ class LocationSettings:
 
 @dataclass(frozen=True)
 class SearchSettings:
-    min_price: int
-    max_price: int
     interval: str
     max_interval: str
-    include_tiny_pcs: bool
-    allow_barebones: bool
+
+
+@dataclass(frozen=True)
+class WatchSettings:
+    """One thing to look for: its searches, filters, budget and how to judge it."""
+
+    name: str
+    preset: str | None
+    search_phrases: list[str]
+    # In aimm's syntax, ready to render. Empty means no keyword gate.
+    keywords: list[str]
+    # The user's own, as literal phrases (rendered quoted).
+    antikeywords: list[str]
+    min_price: int
+    max_price: int
     preferences: str
-    extra_antikeywords: list[str]
+    rating: int
+    allow_barebones: bool
 
 
 @dataclass(frozen=True)
@@ -99,6 +142,7 @@ class NotifySettings:
 class Settings:
     location: LocationSettings
     search: SearchSettings
+    watches: list[WatchSettings]
     ai: AISettings
     notify: NotifySettings
     anonymous: bool
@@ -139,12 +183,11 @@ def parse_settings(data: dict[str, Any]) -> Settings:
     radius = _int(loc, "radius", "location", default=25, lo=1, hi=500)
     seller_locations = _str_list(loc, "seller_locations", "location")
 
-    min_price = _int(search, "min_price", "search", default=40, lo=0, hi=100_000)
-    max_price = _int(search, "max_price", "search", default=400, lo=1, hi=100_000)
-    if min_price >= max_price:
-        raise SettingsError("search.min_price must be less than search.max_price.")
     interval = _interval(search, "interval", default="1h")
     max_interval = _interval(search, "max_interval", default="2h")
+
+    rating = _int(ai, "rating", "ai", default=3, lo=1, hi=5)
+    watches = _watches(data, search, rating)
 
     provider = _str(ai, "provider", "ai", default="anthropic").lower()
     if provider not in AI_PROVIDERS:
@@ -198,20 +241,12 @@ def parse_settings(data: dict[str, Any]) -> Settings:
 
     return Settings(
         location=LocationSettings(search_city, radius, seller_locations),
-        search=SearchSettings(
-            min_price=min_price,
-            max_price=max_price,
-            interval=interval,
-            max_interval=max_interval,
-            include_tiny_pcs=_bool(search, "include_tiny_pcs", "search", default=False),
-            allow_barebones=_bool(search, "allow_barebones", "search", default=True),
-            preferences=_str(search, "preferences", "search", default=""),
-            extra_antikeywords=_antikeywords(search),
-        ),
+        search=SearchSettings(interval=interval, max_interval=max_interval),
+        watches=watches,
         ai=AISettings(
             provider=provider,
             model=model,
-            rating=_int(ai, "rating", "ai", default=3, lo=1, hi=5),
+            rating=rating,
             base_url=base_url,
         ),
         notify=NotifySettings(methods=methods, fields=fields),
@@ -222,12 +257,123 @@ def parse_settings(data: dict[str, Any]) -> Settings:
     )
 
 
-def _antikeywords(search: dict[str, Any]) -> list[str]:
-    values = _str_list(search, "extra_antikeywords", "search")
-    # Rendered as quoted literals; an empty phrase would match every listing.
-    if any(not v.replace('"', "").strip() for v in values):
-        raise SettingsError("search.extra_antikeywords entries must not be empty.")
+def _watches(data: dict[str, Any], search: dict[str, Any], rating: int) -> list[WatchSettings]:
+    if "watch" not in data:
+        return _legacy_watches(search, rating)
+    legacy = sorted(LEGACY_SEARCH_KEYS & search.keys())
+    if legacy:
+        raise SettingsError(
+            f"search.{', search.'.join(legacy)} belong in a [[watch]] now; move them there."
+        )
+    tables = data["watch"]
+    if not isinstance(tables, list) or not all(isinstance(t, dict) for t in tables):
+        raise SettingsError("watch must be a list of [[watch]] tables.")
+    if not 1 <= len(tables) <= MAX_WATCHES:
+        raise SettingsError(f"Add between 1 and {MAX_WATCHES} [[watch]] tables.")
+    watches = [_watch(t, rating) for t in tables]
+    names = [w.name.lower() for w in watches]
+    if len(set(names)) != len(names):
+        raise SettingsError("Each [[watch]] needs a different name.")
+    return watches
+
+
+def _watch(t: dict[str, Any], default_rating: int) -> WatchSettings:
+    unknown = sorted(t.keys() - WATCH_KEYS)
+    if unknown:
+        raise SettingsError(
+            f"[[watch]] has unknown {', '.join(unknown)}; use {', '.join(sorted(WATCH_KEYS))}."
+        )
+    name = _str(t, "name", "watch")
+    if not _NAME_RE.match(name):
+        raise SettingsError(
+            f"watch.name {name!r} must be 1-40 letters, digits, spaces, '-' or '_', "
+            "starting with a letter or digit."
+        )
+    section = f"watch {name!r}"
+    preset_name = _str(t, "preset", section, default="") or None
+    if preset_name is not None and preset_name not in PRESETS:
+        raise SettingsError(f"{section}: preset must be one of {', '.join(PRESETS)}.")
+    preset = PRESETS[preset_name] if preset_name else None
+
+    phrases = _phrases(t, "search_phrases", section)
+    if not phrases:
+        if preset is None:
+            raise SettingsError(f"{section}: search_phrases is required without a preset.")
+        phrases = list(preset.search_phrases)
+    if len(phrases) > MAX_PHRASES:
+        # Each phrase is a page load per interval; Facebook throttles busy sessions.
+        raise SettingsError(f"{section}: use at most {MAX_PHRASES} search_phrases.")
+
+    if "keywords" in t:
+        keywords = [quote_phrase(k) for k in _phrases(t, "keywords", section)]
+    else:
+        keywords = list(preset.keywords) if preset else []
+
+    if "allow_barebones" in t and not (preset and preset.barebones_antikeywords):
+        raise SettingsError(f"{section}: allow_barebones only applies to the mini-pc presets.")
+
+    if "max_price" not in t:
+        raise SettingsError(f"{section}: max_price is required.")
+    min_price = _int(t, "min_price", section, default=0, lo=0, hi=1_000_000)
+    max_price = _int(t, "max_price", section, default=0, lo=1, hi=1_000_000)
+    if min_price >= max_price:
+        raise SettingsError(f"{section}: min_price must be less than max_price.")
+
+    return WatchSettings(
+        name=name,
+        preset=preset_name,
+        search_phrases=phrases,
+        keywords=keywords,
+        antikeywords=_phrases(t, "antikeywords", section),
+        min_price=min_price,
+        max_price=max_price,
+        preferences=_str(t, "preferences", section, default=""),
+        rating=_int(t, "rating", section, default=default_rating, lo=1, hi=5),
+        allow_barebones=_bool(t, "allow_barebones", section, default=True),
+    )
+
+
+def _legacy_watches(search: dict[str, Any], rating: int) -> list[WatchSettings]:
+    """The [search]-only format: a mini-PC watch, plus tiny PCs if asked for.
+
+    The names are the item names aimm used then, so cached ratings still apply.
+    """
+    min_price = _int(search, "min_price", "search", default=40, lo=0, hi=100_000)
+    max_price = _int(search, "max_price", "search", default=400, lo=1, hi=100_000)
+    if min_price >= max_price:
+        raise SettingsError("search.min_price must be less than search.max_price.")
+    presets = {"nuc": "mini-pc"}
+    if _bool(search, "include_tiny_pcs", "search", default=False):
+        presets["tiny_pc"] = "tiny-pc"
+    return [
+        WatchSettings(
+            name=name,
+            preset=preset,
+            search_phrases=list(PRESETS[preset].search_phrases),
+            keywords=list(PRESETS[preset].keywords),
+            antikeywords=_phrases(search, "extra_antikeywords", "search"),
+            min_price=min_price,
+            max_price=max_price,
+            preferences=_str(search, "preferences", "search", default=""),
+            rating=rating,
+            allow_barebones=_bool(search, "allow_barebones", "search", default=True),
+        )
+        for name, preset in presets.items()
+    ]
+
+
+def _phrases(t: dict[str, Any], key: str, section: str) -> list[str]:
+    """Literal phrases; quotes are dropped, since they'd change aimm's matching."""
+    values = [v.replace('"', "").strip() for v in _str_list(t, key, section)]
+    # An empty phrase would match (or search for) every listing.
+    if any(not v for v in values):
+        raise SettingsError(f"{section}.{key} entries must not be empty.")
     return values
+
+
+def quote_phrase(phrase: str) -> str:
+    """A phrase as an aimm keyword literal, never an expression."""
+    return f'"{phrase}"'
 
 
 def _safe_base_url(url: str) -> bool:

@@ -7,6 +7,9 @@ from ai_marketplace_monitor.utils import is_substring
 
 from deal_hunter import profile
 
+# What a mini-pc watch drops on.
+ANTIKEYWORDS = profile.COMMON_ANTIKEYWORDS + profile.MINI_PC_ANTIKEYWORDS
+
 KEEP = [
     "Intel NUC8i5BEH 16GB RAM 256GB SSD",
     "Beelink SER5 Pro Ryzen 7 5800H mini pc",
@@ -40,7 +43,7 @@ ANTI = [
 @pytest.mark.parametrize("title", KEEP)
 def test_good_listings_pass_keywords_and_antikeywords(title: str) -> None:
     assert is_substring(profile.NUC_KEYWORDS, title)
-    assert not is_substring(profile.ANTIKEYWORDS, title)
+    assert not is_substring(ANTIKEYWORDS, title)
 
 
 @pytest.mark.parametrize("title", GATED_OUT)
@@ -59,12 +62,12 @@ NOT_ANTI = [
 
 @pytest.mark.parametrize("title", NOT_ANTI)
 def test_healthy_listings_are_not_dropped(title: str) -> None:
-    assert not is_substring(profile.ANTIKEYWORDS, title)
+    assert not is_substring(ANTIKEYWORDS, title)
 
 
 @pytest.mark.parametrize("title", ANTI)
 def test_junk_listings_hit_antikeywords(title: str) -> None:
-    assert is_substring(profile.ANTIKEYWORDS, title)
+    assert is_substring(ANTIKEYWORDS, title)
 
 
 def test_barebones_antikeywords_catch_barebone_listings() -> None:
@@ -87,16 +90,14 @@ def test_every_keyword_parses_as_an_expression() -> None:
     from ai_marketplace_monitor.utils import expr
 
     for kw in (
-        profile.NUC_KEYWORDS
-        + profile.TINY_KEYWORDS
-        + profile.ANTIKEYWORDS
-        + profile.BAREBONES_ANTIKEYWORDS
+        profile.NUC_KEYWORDS + profile.TINY_KEYWORDS + ANTIKEYWORDS + profile.BAREBONES_ANTIKEYWORDS
     ):
         expr.parseString(kw, parseAll=True)
 
 
-def test_rating_prompt_keeps_aimm_parse_format() -> None:
-    assert '"Rating <1-5>: <summary>"' in profile.NUC_RATING_PROMPT
+def test_rating_prompts_keep_aimm_parse_format() -> None:
+    assert '"Rating <1-5>: <summary>"' in profile.MINI_PC_RATING_PROMPT
+    assert '"Rating <1-5>: <summary>"' in profile.GENERIC_RATING_PROMPT
 
 
 @pytest.mark.parametrize(

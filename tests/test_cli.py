@@ -80,7 +80,7 @@ def test_check(settings: Path, capsys: pytest.CaptureFixture[str]) -> None:
     out = capsys.readouterr().out
     assert "antikeyword" in out and "price outside" in out
     main(["-s", str(settings), "check", "String trimmer", "info: https://x.example/?q=qNuc"])
-    assert "[nuc] DROP: no brand/form-factor keyword" in capsys.readouterr().out
+    assert "[nuc] DROP: no required keyword" in capsys.readouterr().out
 
 
 def test_run_refuses_without_env(

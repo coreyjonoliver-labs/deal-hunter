@@ -41,7 +41,7 @@ from importlib.metadata import version
 from pathlib import Path
 from string import Template
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 from deal_hunter import session as fb_session
 from deal_hunter.events import events_path, read_events
@@ -79,6 +79,8 @@ class Result:
     comment: str | None = None
     rated_at: float | None = None
     notified: bool = False
+    # The watch that rated it, or else the first whose filters it passes.
+    watch: str | None = None
     # Why today's filters would drop it (rated before a filter change).
     dropped: list[str] = field(default_factory=list)
 
@@ -286,7 +288,7 @@ def collect(settings: Settings, home: Path, now: float | None = None) -> Snapsho
             notified=listing_id in notified,
         )
         # aimm keys ratings by the listing's hash, which includes the search
-        # item's name; the cached details have it blank.
+        # item's (watch's) name; the cached details have it blank.
         for name in names:
             try:
                 listing_hash = Listing(**{**details, "name": name}).hash
@@ -299,14 +301,19 @@ def collect(settings: Settings, home: Path, now: float | None = None) -> Snapsho
                     result.score = score
                     result.comment = str(value.get("comment", ""))
                     result.rated_at = rated_at
+                    result.watch = name
                 break
         text = f"{result.title}  {result.description}"
-        per_item = [
-            drop_reasons(item, text, parse_price(result.price), result.location, seller_locations)
-            for item in items.values()
-        ]
-        if per_item and all(per_item):
-            result.dropped = per_item[0]
+        per_item = {
+            name: drop_reasons(
+                item, text, parse_price(result.price), result.location, seller_locations
+            )
+            for name, item in items.items()
+        }
+        if result.watch is None:
+            result.watch = next((name for name, reasons in per_item.items() if not reasons), None)
+        if per_item and all(per_item.values()):
+            result.dropped = per_item.get(result.watch or "") or next(iter(per_item.values()))
         results.append(result)
     cache_db = home / "cache.db"
     return Snapshot(
@@ -415,7 +422,7 @@ def summary(snap: Snapshot, settings: Settings) -> dict[str, Any]:
         return sum(c for c in map(usage_cost, events) if c is not None)
 
     rated = [r for r in snap.results if r.shown]
-    matches = [r for r in rated if r.score is not None and r.score >= settings.ai.rating]
+    matches = [r for r in rated if is_match(r, settings)]
     searches = by_kind.get("search_summary", [])
     problems = [e for e in snap.events if e.get("kind") in ("error", "warning")]
     st = status(snap, settings)
@@ -468,11 +475,18 @@ def summary(snap: Snapshot, settings: Settings) -> dict[str, Any]:
             "search_city": settings.location.search_city,
             "radius": settings.location.radius,
             "seller_locations": len(settings.location.seller_locations),
-            "price": f"${settings.search.min_price}–${settings.search.max_price}",
             "interval": f"{settings.search.interval}–{settings.search.max_interval}",
             "rating": settings.ai.rating,
             "notify": settings.notify.methods,
-            "items": snap.items,
+            "watches": [
+                {
+                    "name": w.name,
+                    "preset": w.preset,
+                    "price": f"${w.min_price}–${w.max_price}",
+                    "rating": w.rating,
+                }
+                for w in settings.watches
+            ],
             "cache_bytes": snap.cache_bytes,
         },
         "errors": snap.errors,
@@ -567,9 +581,20 @@ VIEWS = {
 }
 
 
-def select(results: list[Result], view: str, threshold: int) -> list[Result]:
+def is_match(r: Result, settings: Settings) -> bool:
+    """Rated at or above its watch's notify rating (the default if the watch is gone)."""
+    ratings = {w.name: w.rating for w in settings.watches}
+    threshold = ratings.get(r.watch or "", settings.ai.rating)
+    return r.shown and r.score is not None and r.score >= threshold
+
+
+def select(
+    results: list[Result], view: str, settings: Settings, watch: str | None = None
+) -> list[Result]:
+    if watch is not None:
+        results = [r for r in results if r.watch == watch]
     if view == "matches":
-        chosen = [r for r in results if r.shown and (r.score or 0) >= threshold]
+        chosen = [r for r in results if is_match(r, settings)]
     elif view == "rated":
         chosen = [r for r in results if r.shown]
     else:
@@ -584,21 +609,35 @@ def e(value: object) -> str:
     return html.escape(str(value), quote=True)
 
 
-def render_page(snap: Snapshot, settings: Settings, view: str = "matches") -> str:
+def page_url(view: str, watch: str | None) -> str:
+    return f"/?view={view}" + (f"&watch={quote(watch)}" if watch is not None else "")
+
+
+def render_page(
+    snap: Snapshot, settings: Settings, view: str = "matches", watch: str | None = None
+) -> str:
     data = summary(snap, settings)
     if view not in VIEWS:
         view = "matches"
-    shown = select(snap.results, view, settings.ai.rating)
-    counts = {
-        "matches": data["listings"]["matches"],
-        "rated": data["listings"]["rated"],
-        "all": data["listings"]["seen"],
-    }
+    names = [w.name for w in settings.watches]
+    if watch not in names:
+        watch = None
+    shown = select(snap.results, view, settings, watch)
+    counts = {key: len(select(snap.results, key, settings, watch)) for key in VIEWS}
     tabs = "".join(
-        f'<a class="tab{" on" if key == view else ""}" href="/?view={key}">'
+        f'<a class="tab{" on" if key == view else ""}" href="{e(page_url(key, watch))}">'
         f"{e(label)} <span>{counts[key]}</span></a>"
         for key, label in VIEWS.items()
     )
+    if len(names) > 1:
+        chips = [(None, "All watches"), *((n, n) for n in names)]
+        tabs += '<span class="tabsep"></span>' + "".join(
+            f'<a class="tab watch{" on" if name == watch else ""}" '
+            f'href="{e(page_url(view, name))}">{e(label)}</a>'
+            for name, label in chips
+        )
+    ratings = sorted({w.rating for w in settings.watches})
+    threshold = f"rated {ratings[0]}+" if len(ratings) == 1 else "at each watch's rating"
     st = data["status"]
     ai = data["ai"]
     cards = [
@@ -606,7 +645,7 @@ def render_page(snap: Snapshot, settings: Settings, view: str = "matches") -> st
         (
             "Matches",
             number(data["listings"]["matches"]),
-            f"rated {settings.ai.rating}+ of {number(data['listings']['rated'])} rated",
+            f"{threshold} of {number(data['listings']['rated'])} rated",
         ),
         (
             "Searches (24h)",
@@ -627,11 +666,11 @@ def render_page(snap: Snapshot, settings: Settings, view: str = "matches") -> st
         for k, v, s in cards
     )
     if shown:
-        results_html = "".join(result_html(r, snap.now) for r in shown)
+        results_html = "".join(result_html(r, snap.now, len(names) > 1) for r in shown)
     else:
         results_html = (
             '<p class="empty">Nothing here yet. Matches show up once the AI rates a '
-            f"local listing {settings.ai.rating} or higher.</p>"
+            "local listing at or above its watch's rating.</p>"
         )
     errors_html = "".join(f'<p class="banner">{e(msg)}</p>' for msg in data["errors"])
     return page_template().substitute(
@@ -649,7 +688,7 @@ def stars(score: int) -> str:
     return "★" * score + "☆" * (5 - score)
 
 
-def result_html(r: Result, now: float) -> str:
+def result_html(r: Result, now: float, show_watch: bool = False) -> str:
     image = r.image_url(now)
     img = (
         f'<img src="{e(image)}" alt="" loading="lazy" referrerpolicy="no-referrer">'
@@ -670,6 +709,8 @@ def result_html(r: Result, now: float) -> str:
     if r.dropped:
         rating += f'<p class="dropped">Filtered out: {e("; ".join(r.dropped))}</p>'
     badges = []
+    if show_watch and r.watch:
+        badges.append(f'<span class="badge watch">{e(r.watch)}</span>')
     if r.notified:
         badges.append('<span class="badge">notified</span>')
     if r.condition:
@@ -729,10 +770,12 @@ def side_html(data: dict[str, Any], now: float) -> str:
     config = [
         ("Location", f"{e(app['search_city'])} · {app['radius']} mi"),
         ("Seller towns", number(app["seller_locations"]) if app["seller_locations"] else "any"),
-        ("Price", e(app["price"])),
         ("Search every", e(app["interval"])),
-        ("Notify at rating", f"{app['rating']}+ via {e(', '.join(app['notify']) or 'nothing')}"),
-        ("Searches", e(", ".join(app["items"]))),
+        ("Notify via", e(", ".join(app["notify"]) or "nothing")),
+        *(
+            (f"Watch: {w['name']}", f"{e(w['price'])} · rating {w['rating']}+")
+            for w in app["watches"]
+        ),
         ("Cache", e(size(app["cache_bytes"]))),
         ("Versions", f"deal-hunter {e(app['deal_hunter'])} · aimm {e(app['aimm'])}"),
     ]
@@ -913,8 +956,10 @@ def make_handler(settings: Settings, home: Path, hosts: set[str]) -> type[BaseHT
                 return
             snap = snapshots.get()
             if url.path == "/":
-                view = parse_qs(url.query).get("view", ["matches"])[0]
-                body = render_page(snap, settings, view).encode()
+                query = parse_qs(url.query)
+                view = query.get("view", ["matches"])[0]
+                watch = query.get("watch", [None])[0]
+                body = render_page(snap, settings, view, watch).encode()
                 self.send(HTTPStatus.OK, "text/html; charset=utf-8", body, head)
             else:
                 data = summary(snap, settings)
@@ -928,11 +973,12 @@ def make_handler(settings: Settings, home: Path, hosts: set[str]) -> type[BaseHT
                         "score": r.score,
                         "comment": r.comment,
                         "notified": r.notified,
+                        "watch": r.watch,
                         "filtered_out": r.dropped,
                         "updated_at": r.updated_at,
                         "rated_at": r.rated_at,
                     }
-                    for r in select(snap.results, "all", settings.ai.rating)
+                    for r in select(snap.results, "all", settings)
                 ]
                 body = json.dumps(data, indent=1).encode()
                 self.send(HTTPStatus.OK, "application/json", body, head)

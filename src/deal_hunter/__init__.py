@@ -1,1 +1,1 @@
-"""NUC / mini-PC tuned front-end for ai-marketplace-monitor."""
+"""Watch Facebook Marketplace for what you want, rated by AI."""
