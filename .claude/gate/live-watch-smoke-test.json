@@ -1,0 +1,8 @@
+{
+  "spec": "live-watch-smoke-test",
+  "date": "2026-10-15",
+  "review": [],
+  "review_skipped": "doc-only change (recorded results of a manual live run); no code, config or manifest changed",
+  "checks": "enforce",
+  "verdict": "pass"
+}

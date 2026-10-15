@@ -8,8 +8,17 @@ spec each.
 
 - [x] pin-image-digest — pin the published 0.2.0 digest in `deploy/` and test
   that it stays in step with the package version
-- [ ] live-watch-smoke-test — run a non-mini-PC `[[watch]]` against Facebook end
+- [x] live-watch-smoke-test — run a non-mini-PC `[[watch]]` against Facebook end
   to end (operator-run: needs a saved session and an API key)
+- [ ] investigate-search-failures — the live run logged "Failed to get search
+  results" for 4 of 6 phrases and a "list index out of range" parse error in
+  aimm 0.10.2; find out whether it's Facebook markup, throttling or the
+  session, and fix or patch it in `launch.py` (also: that message puts the
+  Marketplace location id into the events file / dashboard)
+- [ ] rating-summary-format — rating summaries omit the estimated fair price
+  the prompt asks for, and some end in a stray `**` (markdown leaking into the
+  comment); tighten the prompts and/or clean the comment before display and
+  notification
 
 ## Up Next
 
