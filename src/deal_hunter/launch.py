@@ -68,8 +68,19 @@
    per subclass. The result is ``upstream or discord_ok``, which is what makes
    aimm record the listings as notified (see discord.py).
 
+10. Notification attempts are recorded. aimm logs a notifier's success at
+    INFO and its failure at ERROR only after its own retries, and logs nothing
+    structured. Every push notifier sends through
+    ``NotificationConfig.send_message_with_retry`` (which answers a bool and
+    doesn't raise) and email through ``EmailNotificationConfig.send_email_message``;
+    both are wrapped here to record one ``notification`` event (method, outcome
+    ``sent``/``failed``; never the title, topic or message), and Discord's
+    post is recorded in ``notify_all_with_discord``. ``notify()`` has already
+    decided there is something to send by then, so a batch of already-notified
+    listings or an unconfigured notifier is not an attempt.
+
 ``deal-hunter run`` starts aimm through ``main`` in the same process, which
-applies all nine. aimm is pinned, and tests/test_launch.py checks the patch points
+applies all ten. aimm is pinned, and tests/test_launch.py checks the patch points
 still exist.
 
 This deliberately has no ``python -m`` entry: ``-m`` puts the current
@@ -85,11 +96,12 @@ import re
 import stat
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from logging import Logger
 from typing import Any
 
 from ai_marketplace_monitor.ai import AIResponse
+from ai_marketplace_monitor.email_notify import EmailNotificationConfig
 from ai_marketplace_monitor.facebook import FacebookMarketplace, FacebookSearchResultPage
 from ai_marketplace_monitor.monitor import MarketplaceMonitor
 from ai_marketplace_monitor.notification import NotificationConfig
@@ -100,6 +112,7 @@ from deal_hunter import discord, events
 from deal_hunter import session as fb_session
 from deal_hunter.discord import DiscordWebhook
 from deal_hunter.session import Session, SessionError
+from deal_hunter.settings import DEAL_HUNTER_NOTIFIERS, NOTIFIERS
 from deal_hunter.summary import cap, clean_summary
 
 if sys.version_info >= (3, 11):
@@ -165,6 +178,11 @@ _summary_warned = False
 # The plain function behind aimm's classmethod: calling it with a subclass as cls
 # keeps aimm's own recursion (`cls.__subclasses__()`) walking that subclass.
 _upstream_notify_all = NotificationConfig.__dict__["notify_all"].__func__
+_upstream_send_with_retry = NotificationConfig.send_message_with_retry
+_upstream_send_email = EmailNotificationConfig.send_email_message
+# The values a notification event's method may take (metrics label values).
+NOTIFY_METHODS = (*NOTIFIERS, *DEAL_HUNTER_NOTIFIERS)
+NOTIFY_LOGGER = logging.getLogger("monitor")
 # Set by main when the discord method is enabled. None = aimm's notifiers only.
 DISCORD: DiscordWebhook | None = None
 
@@ -235,6 +253,42 @@ def to_cache_with_clean_summary(
     _upstream_to_cache(self, listing, item_config, marketplace_config, local_cache)
 
 
+def record_notification(logger: Logger | None, method: Any, ok: bool) -> None:
+    """Log one notification attempt as a structured event (see the module docstring, 10)."""
+    label = method if method in NOTIFY_METHODS else "other"
+    outcome = "sent" if ok else "failed"
+    event = aimm_event("notification", method=label, outcome=outcome)
+    (logger or NOTIFY_LOGGER).info(f"[Notify] {label}: {outcome}", extra=event)
+
+
+def _recorded(method: Any, logger: Logger | None, send: Callable[[], Any]) -> bool:
+    try:
+        ok = bool(send())
+    except Exception:
+        record_notification(logger, method, False)
+        raise
+    record_notification(logger, method, ok)
+    return ok
+
+
+def send_message_recorded(
+    self: Any, title: str, message: str, logger: Logger | None = None
+) -> bool:
+    """NotificationConfig.send_message_with_retry, recording whether the message went."""
+    return _recorded(
+        self.notify_method, logger, lambda: _upstream_send_with_retry(self, title, message, logger)
+    )
+
+
+def send_email_recorded(self: Any, *args: Any, **kwargs: Any) -> bool:
+    """EmailNotificationConfig.send_email_message, recording whether the email went."""
+    return _recorded(
+        self.notify_method,
+        kwargs.get("logger"),
+        lambda: _upstream_send_email(self, *args, **kwargs),
+    )
+
+
 def notify_all_with_discord(
     cls: Any, /, config: Any, listings: Any, ratings: Any, statuses: Any, **kwargs: Any
 ) -> bool:
@@ -250,15 +304,16 @@ def notify_all_with_discord(
     upstream_result: bool = _upstream_notify_all(cls, config, listings, ratings, statuses, **kwargs)
     if cls is not NotificationConfig or DISCORD is None:
         return upstream_result
+    force = bool(kwargs.get("force", False))
     try:
-        discord_ok = discord.notify(
-            DISCORD, listings, ratings, statuses, force=bool(kwargs.get("force", False))
-        )
+        discord_ok = discord.notify(DISCORD, listings, ratings, statuses, force=force)
     except Exception as e:  # noqa: BLE001 — a card bug must not stop the other notifiers' result
-        logging.getLogger("monitor").error(
-            f"[Discord] Couldn't build the cards: {type(e).__name__}"
-        )
+        NOTIFY_LOGGER.error(f"[Discord] Couldn't build the cards: {type(e).__name__}")
         discord_ok = False
+    # Only a batch with something new is an attempt (discord.notify sends nothing,
+    # and answers False, when every listing was already notified).
+    if force or any(getattr(s, "name", "") != "NOTIFIED" for s in statuses):
+        record_notification(NOTIFY_LOGGER, "discord", discord_ok)
     return upstream_result or discord_ok
 
 
@@ -529,6 +584,8 @@ def main(
     setattr(ai, "re", StrictRatingRe())  # noqa: B010 — aimm's own module-level import
     ai.AIResponse.to_cache = to_cache_with_clean_summary  # type: ignore[method-assign]
     NotificationConfig.notify_all = classmethod(notify_all_with_discord)  # type: ignore[assignment]
+    NotificationConfig.send_message_with_retry = send_message_recorded  # type: ignore[method-assign]
+    EmailNotificationConfig.send_email_message = send_email_recorded  # type: ignore[method-assign]
     monitor.MarketplaceMonitor._launch_browser = launch_browser  # type: ignore[method-assign]
     monitor.MarketplaceMonitor.__init__ = monitor_init  # type: ignore[method-assign]
     app(args=args, prog_name="ai-marketplace-monitor")

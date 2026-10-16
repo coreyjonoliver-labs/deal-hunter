@@ -366,3 +366,14 @@ def test_other_env_names_are_unaffected_by_the_webhook_rule(
     monkeypatch.setenv("MY_WEBHOOK_URL_NOTES", "other-plain-value")
     assert "plain-value-here" not in events.secret_values()
     assert "other-plain-value" not in events.secret_values()
+
+
+def test_notification_event(recorder: events.EventRecorder) -> None:
+    extra = aimm_event("notification", method="ntfy", outcome="failed", title="secret listing")
+    event = recorder.to_event(record("[Notify] attempt", **extra))
+    assert event == {
+        "ts": event["ts"],
+        "kind": "notification",
+        "method": "ntfy",
+        "outcome": "failed",
+    }
