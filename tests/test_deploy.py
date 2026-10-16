@@ -43,6 +43,32 @@ _DEPLOYMENT_IMAGE_RE = re.compile(
 DEPLOYMENT_IMAGE_LINES = 3
 
 
+def _to_element_keys(text: str, start: str) -> dict[str, str]:
+    """The selectors in one NetworkPolicy `to` element, each with its first matchLabels line.
+
+    The element starts at the line holding `start` and ends at the first line indented
+    less than its keys. A selector belongs to it only at the keys' own indent, so two
+    selectors returned together are ANDed. A line scan, not a regex, so it stays linear.
+    """
+    lines = text.splitlines()
+    first = next(i for i, line in enumerate(lines) if line.strip() == start.strip())
+    indent = lines[first].index(start.lstrip("- ").strip())
+    keys: dict[str, str] = {}
+    key = ""
+    for line in [lines[first].replace("- ", "  ", 1), *lines[first + 1 :]]:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        col = len(line) - len(line.lstrip())
+        if col < indent:
+            break
+        body = line.split("#", 1)[0].strip()
+        if col == indent:
+            key = body.rstrip(":")
+        elif key and key not in keys and body != "matchLabels:":
+            keys[key] = body
+    return keys
+
+
 def package_version(pyproject: str) -> str:
     match = re.search(r'^version\s*=\s*"([^"]+)"', pyproject, re.MULTILINE)
     assert match, "no version in pyproject.toml"
@@ -448,11 +474,10 @@ def test_tracing_component_sets_only_the_endpoint_on_the_monitor_container() -> 
     assert "ingress" not in text.split("patches:")[1]
     # The rule names the collector's pods, not the whole namespace: namespaceSelector and
     # podSelector are one `to` element (same indent), so they AND together.
-    assert re.search(
-        r"- namespaceSelector:\n(?:\s+.*\n)*?\s+podSelector:\n\s+matchLabels:\n\s+"
-        r"app\.kubernetes\.io/name: opentelemetry-collector",
-        text,
-    )
+    assert _to_element_keys(text, "- namespaceSelector:") == {
+        "namespaceSelector": "kubernetes.io/metadata.name: observability",
+        "podSelector": "app.kubernetes.io/name: opentelemetry-collector",
+    }
     assert "use https" in text
     # The label is listed among the things to edit, with the consequence of getting it wrong.
     edit_section = text.split("apiVersion:")[0]

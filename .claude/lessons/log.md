@@ -346,3 +346,15 @@ consolidates recurring ones into rules.
   recurrence_of: "2026-10-15 / scanner config taken from outside the checkout (gitleaks)"
   disposition: upheld
   finding: "Fake secrets in test fixtures must look fake and stay low-entropy (e.g. `tok-xxxxxxxxxx`, not `sk-test-0123456789abcdef`): CI's gitleaks scans every commit with no allowlist, so a realistic value fails secret-scan and only a history rewrite clears it. The local gate doesn't run gitleaks, so both reviewers passed it; run gitleaks (CI's flags, --log-opts=main..HEAD) before the first push."
+
+- date: 2026-10-16
+  source: "otel-tracing / tests/test_deploy.py:452 / CI CodeQL (py/redos, high)"
+  importance: 4
+  mechanizable: yes
+  scope: unclassified
+  category: build-test
+  module: "tests"
+  tags: [codeql, redos, regex, test-code, gate-gap]
+  recurrence_of: "2026-10-16 / CI-only scanner caught what the local gate missed (gitleaks fixtures)"
+  disposition: upheld
+  finding: "CodeQL scans test code too and the main-code-scanning ruleset blocks a new high alert anywhere: no nested quantifiers whose inner class can also match the separator (e.g. `(?:\\s+.*\\n)*?`, where \\s matches \\n). Check structured text (YAML) with a line scan or a declared parser, not a multi-line regex."
