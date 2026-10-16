@@ -101,6 +101,23 @@ that **unattended runs need a whole-process sandbox** — see the plugin's
 `docs/sandboxing.md`. (The plugin's workflow docs aren't copied into this
 public repo.)
 
+**Merge boundary.** `main` takes changes only through a PR, merged with a
+merge commit, once conversations are resolved and the required checks pass:
+`test` and `image` (`build.yml`), `secret-scan`, `dependency-review` and
+`codeql` (`security.yml`), all from GitHub Actions. New CodeQL alerts block
+through the `main-code-scanning` ruleset. Admins are bound too. A PR runs its
+own copy of the workflows, so **a PR that touches `.github/workflows/**` sets
+its own checks: read that diff by hand before merging.** Publishing isn't
+covered: any branch whose workflow publishes (manual dispatch, or an edited
+push trigger) can still publish over the version tag until
+`immutable-release-tags`. The agent's `gh` runs unsandboxed with the
+operator's token; the `permissions.ask` prompts on merge, publish and settings
+subcommands are a speed bump, not a boundary (that's `scoped-agent-token`).
+`.github/CODEOWNERS` names the load-bearing paths, and
+`tests/test_codeowners.py` keeps them existing. The agent can't write
+`.github/workflows/**` or `.claude/settings.json`; it hands the operator the
+exact content to apply.
+
 ## Quality gate
 
 A change is **not done** until the review gate passes. The bar:

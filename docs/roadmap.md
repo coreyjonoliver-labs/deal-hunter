@@ -32,7 +32,8 @@ radius for a compromised browser.
 
 | Spec | Depends on | Status |
 |---|---|---|
-| graduate-established | None | — |
+| [graduate-established](specs/graduate-established.md) | None | Implemented (operator steps pending) |
+| scoped-agent-token | graduate-established | — |
 | chromium-sandbox-seccomp (Research) | None | — |
 | dashboard-own-pod | chromium-sandbox-seccomp | — |
 

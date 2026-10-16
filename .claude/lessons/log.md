@@ -155,4 +155,83 @@ consolidates recurring ones into rules.
   module: "src/deal_hunter/discord.py"
   tags: [fail-open, delivery, notifications, isolation]
   finding: "Isolating a bad item (drop one rejected card so it can't block the rest) must not turn 'nothing was delivered' into success: report success only when at least one item was actually accepted, and surface the rejection — otherwise a sender that rejects everything marks all work done and hides it."
+- date: 2026-10-15
+  source: "graduate-established / .github/workflows/security.yml (proposed) / security-auditor (HIGH)"
+  importance: 6
+  mechanizable: yes
+  scope: unclassified
+  category: security
+  module: ".github/workflows"
+  tags: [ci, secret-scan, gitleaks, self-configuring-check]
+  finding: "A scanner run over a PR's tree must not take its config, ignore list or inline suppressions from that tree: write the config outside the checkout and disable inline allow comments (gitleaks: --config, --gitleaks-ignore-path, --ignore-gitleaks-allow), and prove it with a probe that tries to hide a planted secret."
+
+- date: 2026-10-15
+  source: "graduate-established / branch protection (proposed) / security-auditor (HIGH) + code-reviewer (MEDIUM)"
+  importance: 6
+  mechanizable: no
+  scope: unclassified
+  category: security
+  module: ".github"
+  tags: [branch-protection, required-checks, pull_request, spoofing]
+  finding: "Required checks on pull_request run the PR's own workflow files, and bare context names accept any app's status: pin each required check to the GitHub Actions app_id, and state plainly that a PR editing workflows defines its own checks (review those diffs by hand, or use required workflows from the base branch)."
+
+- date: 2026-10-15
+  source: "graduate-established / .github/workflows/security.yml codeql (proposed) / code-reviewer + security-auditor (MEDIUM)"
+  importance: 4
+  mechanizable: yes
+  scope: unclassified
+  category: security
+  module: ".github"
+  tags: [codeql, code-scanning, false-gate]
+  finding: "Requiring a CodeQL job only proves the analysis ran; analyze exits 0 with alerts. Blocking on alerts needs a code_scanning ruleset rule (or the code-scanning results check). Don't describe a run-and-report check as a gate."
+
+- date: 2026-10-15
+  source: "graduate-established / spec scope / security-auditor (HIGH)"
+  importance: 5
+  mechanizable: no
+  scope: unclassified
+  category: process
+  module: "docs/specs"
+  tags: [scope-honesty, publishing, workflow_dispatch]
+  finding: "A hardening spec must list the channels it leaves open (here: workflow_dispatch publishing from any branch) and where they're tracked; claiming 'nothing lands unchecked' while a publish path bypasses the boundary overstates the control."
+
+- date: 2026-10-15
+  source: "graduate-established / .claude/settings.json (proposed) / security-auditor (HIGH)"
+  importance: 5
+  mechanizable: yes
+  scope: unclassified
+  category: security
+  module: ".claude/settings.json"
+  tags: [agent-permissions, gh, admin-token, sandbox-excluded]
+  finding: "A command excluded from the sandbox runs with the operator's credentials; when that's an admin forge CLI, the calls that merge, publish or change protection must prompt (permissions.ask) even under a blanket Bash allow, or branch protection binds everyone but the agent."
+- date: 2026-10-15
+  source: "graduate-established / settings-delta permissions.ask (round 2) / security-auditor (HIGH)"
+  importance: 5
+  mechanizable: no
+  scope: unclassified
+  category: security
+  module: ".claude/settings.json"
+  tags: [agent-permissions, pattern-rules, overclaiming]
+  recurrence_of: "2026-10-15 / admin forge CLI must prompt (same control, round 1)"
+  finding: "Command-prefix permission rules are routable (implied POST via -f/--input, -XDELETE, global flags before the subcommand, printing the token and using curl); document them as a speed bump and put the boundary in the credential's scope, never in the pattern list."
+
+- date: 2026-10-15
+  source: "graduate-established / spec edge case 5 (round 2) / security-auditor (MEDIUM)"
+  importance: 4
+  mechanizable: no
+  scope: unclassified
+  category: security
+  module: ".github/workflows/build.yml"
+  tags: [publishing, push-trigger, workflow-self-edit]
+  finding: "A publish guard written inside a workflow can't bind a branch that edits that workflow: any pushed branch runs its own copy with the job's permissions. Restricting publishing needs a control outside the file (environment-scoped credential with a branch policy, registry-side immutability)."
+
+- date: 2026-10-15
+  source: "graduate-established / spec acceptance criteria (round 2) / code-reviewer (MEDIUM)"
+  importance: 3
+  mechanizable: no
+  scope: unclassified
+  category: process
+  module: "docs/specs"
+  tags: [acceptance-criteria, server-side-config, verification]
+  finding: "Server-side settings the test suite can't see (protection, rulesets, repo security toggles, local settings) each need an acceptance criterion with a live read-back command; otherwise half the requirements are unverifiable."
 ```
