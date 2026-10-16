@@ -1,0 +1,54 @@
+# Prometheus metrics for any Prometheus Operator setup: the web container
+# serves /metrics on its own port (9741), nothing else on it, and the pod
+# gets a ServiceMonitor and alert rules. Optional: without this component
+# the metrics port is off.
+#
+# - Metrics are on a separate port because the dashboard port checks the
+#   Host header (a scraper sends the pod IP) and has no login. A scraper is
+#   admitted to 9741 without being admitted to 8740: label the namespace
+#   Prometheus runs in `deal-hunter/metrics-access=true`.
+# - Needs the Prometheus Operator CRDs (ServiceMonitor, PrometheusRule), and
+#   a Prometheus that selects them (many installs require a label such as
+#   `release: <name>` on both; add it from your overlay with `labels:`).
+# - If your overlay replaces the web container's args (the example does, for
+#   --allow-host), the replacement wins over this component's added
+#   arguments: keep `--metrics-port 9741` in your list.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - servicemonitor.yaml
+  - prometheusrule.yaml
+patches:
+  - target:
+      kind: Deployment
+      name: deal-hunter
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/1/args/-
+        value: --metrics-port
+      - op: add
+        path: /spec/template/spec/containers/1/args/-
+        value: "9741"
+      - op: add
+        path: /spec/template/spec/containers/1/ports/-
+        value: {name: metrics, containerPort: 9741}
+  - target:
+      kind: Service
+      name: deal-hunter
+    patch: |-
+      - op: add
+        path: /spec/ports/-
+        value: {name: metrics, port: 9741, targetPort: metrics}
+  - target:
+      kind: NetworkPolicy
+      name: deal-hunter
+    patch: |-
+      - op: add
+        path: /spec/ingress/-
+        value:
+          from:
+            - namespaceSelector:
+                matchLabels:
+                  deal-hunter/metrics-access: "true"
+          ports:
+            - {protocol: TCP, port: 9741}

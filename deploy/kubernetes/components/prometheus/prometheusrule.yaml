@@ -1,0 +1,86 @@
+# Alerts for deal-hunter. Everything under `spec:` is a plain Prometheus rules
+# file once dedented by two spaces; tests/test_deploy.py does that and runs
+# `promtool test rules rules.test.yaml` over it (when promtool is installed),
+# so edit the rules here and the tests beside this file.
+#
+# The rules use no labels beyond those the scrape adds: nothing from the
+# listings, the phrases or the location is ever a label (see README, "Metrics").
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: deal-hunter
+spec:
+  groups:
+    - name: deal-hunter
+      rules:
+        - alert: DealHunterSearchStalled
+          # The heartbeat is the end of the last search round in which a phrase
+          # returned listings. Stale for longer than the configured max interval
+          # plus 30 minutes, or never seen (absent): the monitor isn't finding
+          # anything (stopped, blocked, logged out).
+          expr: |
+            (
+              time() - deal_hunter_last_success_timestamp_seconds
+                > ignoring(bound) (deal_hunter_search_interval_seconds{bound="max"} + 1800)
+            )
+            or
+            absent(deal_hunter_last_success_timestamp_seconds)
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: deal-hunter has not found any listings for longer than its search interval allows
+            description: >-
+              No search round returned listings since the heartbeat
+              (deal_hunter_last_success_timestamp_seconds), or the metric is missing.
+              Check the dashboard's status and recent problems.
+        - alert: DealHunterSessionExpiringSoon
+          expr: |
+            deal_hunter_session_cookie_expiry_timestamp_seconds - time() < 3 * 86400
+            and
+            deal_hunter_session_cookie_expiry_timestamp_seconds - time() > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: The Facebook login cookie expires within 3 days
+            description: Run `deal-hunter login` and update the session Secret before it expires.
+        - alert: DealHunterSessionExpired
+          # session_present is exported only when the monitor isn't anonymous.
+          expr: |
+            deal_hunter_session_cookie_expiry_timestamp_seconds < time()
+            or
+            deal_hunter_session_present == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: deal-hunter has no valid Facebook login
+            description: The saved session expired or was never saved. Run `deal-hunter login` and update the session Secret.
+        - alert: DealHunterSearchFailures
+          # More than half of the phrase searches came back empty over an hour,
+          # with at least 4 searches (so one empty phrase doesn't page).
+          expr: |
+            sum(increase(deal_hunter_searches_total{outcome="failed"}[1h]))
+              / sum(increase(deal_hunter_searches_total[1h])) > 0.5
+            and
+            sum(increase(deal_hunter_searches_total[1h])) >= 4
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: More than half of deal-hunter's phrase searches returned nothing
+            description: >-
+              {{ $value | humanizePercentage }} of phrase searches failed over the last hour.
+              Facebook may be blocking the monitor or have changed its page.
+        - alert: DealHunterAISpendHigh
+          # THE KNOB: the most you expect to spend on AI ratings in 24 hours, in
+          # dollars at list prices (an estimate; it is absent for models without a price).
+          expr: sum(increase(deal_hunter_ai_cost_dollars_total[24h])) > 1.00
+          labels:
+            severity: warning
+          annotations:
+            summary: deal-hunter's estimated AI spend over the last day is above the threshold
+            description: >-
+              Estimated {{ $value | printf "%.2f" }} dollars over 24 hours. A prompt or watch
+              change re-rates listings; check the dashboard's AI usage.

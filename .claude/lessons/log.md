@@ -235,3 +235,46 @@ consolidates recurring ones into rules.
   tags: [acceptance-criteria, server-side-config, verification]
   finding: "Server-side settings the test suite can't see (protection, rulesets, repo security toggles, local settings) each need an acceptance criterion with a live read-back command; otherwise half the requirements are unverifiable."
 ```
+
+- date: 2026-10-16
+  source: "ops-metrics / src/deal_hunter/dashboard.py SnapshotCache._refresh / code-reviewer + security-auditor (MEDIUM)"
+  importance: 5
+  mechanizable: no
+  scope: unclassified
+  category: error-handling
+  module: "src/deal_hunter/dashboard.py"
+  tags: [swallowed-exception, dead-state, stale-data, background-refresh]
+  disposition: upheld
+  finding: "A background refresh that keeps serving the last good value must surface its failure on the consumer path (a gauge, a flag, a one-line log); recording the error in state nothing reads is a swallowed exception."
+
+- date: 2026-10-16
+  source: "ops-metrics / src/deal_hunter/dashboard.py make_metrics_handler / security-auditor (MEDIUM)"
+  importance: 5
+  mechanizable: no
+  scope: unclassified
+  category: security
+  module: "src/deal_hunter/dashboard.py"
+  tags: [dns-rebinding, host-header, loopback-listener, scrape-endpoint]
+  disposition: upheld
+  finding: "Every HTTP listener that can bind loopback needs a Host check, scrape endpoints included; accepting IP literals plus the configured names keeps Prometheus (which scrapes by IP) working while refusing rebound DNS names."
+
+- date: 2026-10-16
+  source: "ops-metrics / deploy/kubernetes/components/prometheus/rules.test.yaml / code-reviewer (MEDIUM)"
+  importance: 4
+  mechanizable: yes
+  scope: unclassified
+  category: build-test
+  module: "tests/test_deploy.py"
+  tags: [promtool, skipped-test, unexecuted-test, ci]
+  finding: "A test that skips when its tool is missing proves nothing until the tool runs somewhere; install the tool in CI (or fail rather than skip there) before relying on the test for an acceptance criterion."
+
+- date: 2026-10-16
+  source: "ops-metrics / docs/specs/ops-metrics.md / code-reviewer (MEDIUM)"
+  importance: 4
+  mechanizable: no
+  scope: unclassified
+  category: process
+  module: "docs/specs"
+  tags: [spec-drift, deviations]
+  disposition: upheld
+  finding: "An implementer-declared deviation from a requirement is folded into the spec text in the same change; a report-only deviation leaves the spec stale as the source of truth."

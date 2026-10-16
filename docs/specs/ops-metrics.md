@@ -1,6 +1,6 @@
 # Spec: Operational metrics for Prometheus
 
-**Status:** Ready
+**Status:** Complete
 **Kind:** Implementation
 **Author:** Corey Oliver
 **Date:** 2026-10-15
@@ -57,7 +57,10 @@ Naming follows a convention meant to be reusable by any periodic job: a
 1. `deal-hunter web` shall accept `--metrics-port PORT` (default: off) and
    `--metrics-host HOST` (default: the `--host` value). When set, it shall serve
    `GET /metrics` on that port in Prometheus text exposition format 0.0.4, and
-   404 for every other path, with no `Host` check and no dashboard content.
+   404 for every other path, with no dashboard content. The `Host` header must
+   be an IP literal (a scraper uses the pod IP; IPv6 bracketed, port optional)
+   or one of the dashboard's allowed host names, else 403, so a DNS-rebound
+   name can't reach the port from a browser.
 2. The metrics endpoint shall expose, with the `deal_hunter_` prefix:
    - `deal_hunter_last_success_timestamp_seconds` (gauge): the end of the most
      recent search round in which at least one phrase of any watch returned
@@ -83,10 +86,15 @@ Naming follows a convention meant to be reusable by any periodic job: a
    - `deal_hunter_search_interval_seconds{bound="min"|"max"}` (gauge, from
      settings), so a stall rule can use the configured interval.
    - `deal_hunter_build_info{version,aimm_version}` (gauge, always 1).
+   - `deal_hunter_cache_read_errors` (gauge): problems reading the cache for this
+     scrape, plus 1 when the last snapshot refresh failed and the scrape is
+     served from the previous snapshot (0 when clean). While it is not 0 from
+     a cache read error, the `deal_hunter_listings` series are omitted. The
+     refresh failure's exception class is printed once per outage to stderr.
 3. Counters shall be derived from the events file, so they reset when the file
    is trimmed (`events.MAX_BYTES`); this shall be documented, and `rate()` /
    `increase()` handle it as a counter reset.
-4. Label values shall be limited to: watch names (validated, ≤ 20), model
+4. Label values shall be limited to: configured watch names (validated by settings: 1–40 characters, so bounded by the number of watches), model
    names, and the fixed enumerations above. No metric or label shall contain a
    search phrase, the Marketplace location, seller towns, listing titles, URLs,
    AI text, or any secret.
@@ -182,10 +190,10 @@ Then none of the phrases, the location or any secret appear
 | No secrets in code, config, tests, or fixtures | Yes | label-hygiene test over the full output |
 | External input is validated before use | Yes | events file treated as untrusted (existing read caps); watch names validated in settings |
 | No injection vector | Yes | label values escaped per the exposition format; only enumerated/validated values |
-| Errors fail closed and don't leak internals | Yes | a broken cache yields metrics without the cache-derived series plus a problems counter, never a stack trace |
+| Errors fail closed and don't leak internals | Yes | a broken cache yields metrics without the cache-derived series plus the `cache_read_errors` gauge, never a stack trace |
 | New dependencies justified and pinned | Yes | none at runtime; a text-format parser in tests only if needed (dev group, locked) |
 | Public interfaces documented; docs updated | Yes | README, deploy README |
-| Metrics port exposes no dashboard content | Yes | `/metrics` only, 404 otherwise; separate NetworkPolicy rule |
+| Metrics port exposes no dashboard content | Yes | `/metrics` only, 404 otherwise; Host must be an IP or an allowed name; separate NetworkPolicy rule |
 | Repo stays free of personal deployment details | Yes | generic namespace label, example threshold |
 
 ## Edge Cases
@@ -196,7 +204,10 @@ Then none of the phrases, the location or any secret appear
 3. Old events from before this spec (no `search_results`) → search
    counters start at the first new event; the heartbeat falls back to
    `search_summary` events.
-4. Anonymous mode → no session series at all, so the session rules (which
+4. Forged or aborted events: an event stamped more than 300 s after the
+   scrape's clock is ignored (for the heartbeat and the dashboard status), and
+   a monitor restart (`browser_ready`) abandons the round in progress.
+5. Anonymous mode → no session series at all, so the session rules (which
    key on those series) stay quiet; the stall rule still covers a monitor that
    Facebook blocks.
 

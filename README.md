@@ -259,6 +259,64 @@ or a `config.toml`. Use a proxy that buffers whole requests, since slow
 clients can tie up the dashboard's 8 connections. `/healthz` answers any
 Host for probes.
 
+### Metrics for Prometheus
+
+```sh
+uv run deal-hunter web --metrics-port 9741     # http://127.0.0.1:9741/metrics
+```
+
+`--metrics-port` (off by default) makes `web` also serve Prometheus metrics
+on a second port, in the text format 0.0.4, from the same data as the page.
+`--metrics-host` sets its address (default: `--host`). That port serves
+`GET /metrics` and nothing else (404 for every other path, no dashboard
+content). Its `Host` check is looser than the dashboard's: an IP address
+(which is what a scraper sends: the pod IP) or one of the dashboard's allowed
+names is served, anything else gets a 403, so a web page can't reach it
+through a rebound host name. It has no login, so `web` warns if you pass
+`--metrics-host` something other than loopback; bind it where only your
+scraper can reach it (in Kubernetes, see
+[deploy/README.md](deploy/README.md)). What it exports holds no search
+phrase, Marketplace location, listing text or URL, AI text or secret; labels
+are only watch names, model names and the fixed values below.
+
+| Metric | Type | Labels | Meaning |
+|---|---|---|---|
+| `deal_hunter_last_success_timestamp_seconds` | gauge | | End of the latest search round in which a phrase of any watch returned listings. Absent before the first one |
+| `deal_hunter_watch_last_success_timestamp_seconds` | gauge | `watch` | The same, per watch |
+| `deal_hunter_searches_total` | counter | `watch`, `outcome` (`ok`, `failed`) | Phrase searches; `failed` means no listings came back |
+| `deal_hunter_listings` | gauge | `state` (`fetched`, `rated`, `filtered_out`, `matched`) | The dashboard's counts |
+| `deal_hunter_ai_calls_total` | counter | `model` | AI rating calls |
+| `deal_hunter_ai_tokens_total` | counter | `model`, `kind` (`input`, `output`, `cache_read`, `cache_write`) | AI tokens |
+| `deal_hunter_ai_cost_dollars_total` | counter | `model` | Estimated spend at list prices; absent for a model without a price |
+| `deal_hunter_notifications_total` | counter | `method`, `outcome` (`sent`, `failed`) | Notification attempts (one per batch sent) |
+| `deal_hunter_problems_total` | counter | `kind` (`error`, `warning`) | Errors and warnings recorded |
+| `deal_hunter_session_present` | gauge | | 1 if the monitor has saved a Facebook session, else 0 |
+| `deal_hunter_session_saved_timestamp_seconds`, `deal_hunter_session_cookie_expiry_timestamp_seconds` | gauge | | When the session was saved and its login cookie expires; absent when unknown |
+| `deal_hunter_search_interval_seconds` | gauge | `bound` (`min`, `max`) | The configured time between searches |
+| `deal_hunter_cache_read_errors` | gauge | | Problems reading the monitor's cache for this scrape (0 when clean); the `deal_hunter_listings` series are left out while it is not 0 |
+| `deal_hunter_build_info` | gauge | `version`, `aimm_version` | Always 1 |
+
+None of the three session series are exported when `facebook.anonymous` is
+set, so a session alert can't fire for an anonymous monitor.
+
+The counters are tallies over `deal-hunter-events.jsonl`, not counts kept in
+a process, so they survive monitor restarts, and they **reset when the events
+file is trimmed** (once it passes about 2 MB, the oldest half goes). `rate()`
+and `increase()` treat that drop as a counter reset. Search counters start at
+the first `search_results` event after updating; until then the
+last-success timestamp falls back to the recorded search summaries.
+
+If the latest refresh of the snapshot failed, the scrape is answered from the
+previous one and `deal_hunter_cache_read_errors` is at least 1 until a
+refresh succeeds. Events stamped in the future are ignored, and a monitor
+restart abandons the search round in progress.
+
+A scrape reads the same snapshot as the page (at most one read of the cache
+per 30 seconds) and waits at most 1.5 seconds for a refresh, answering with
+the previous snapshot if a large cache takes longer to read. Until the first
+snapshot exists it answers with `deal_hunter_build_info`,
+`deal_hunter_search_interval_seconds` and `deal_hunter_cache_read_errors 1`.
+
 ### Run in a container
 
 The `Dockerfile` builds one image for both `run` and `web` (CI publishes it to
@@ -270,7 +328,7 @@ from outside. Under Kubernetes, run it as uid/gid 1000 with `fsGroup: 1000`
 so it can write its volumes.
 
 `deploy/` has ready-made Compose and Kubernetes manifests (with optional
-Kata and Cilium egress components), and explains what each isolation choice
+Kata, Cilium egress and Prometheus components), and explains what each isolation choice
 protects: see [deploy/README.md](deploy/README.md).
 
 | | `run` | `web` |
