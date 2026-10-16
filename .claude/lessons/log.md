@@ -358,3 +358,15 @@ consolidates recurring ones into rules.
   recurrence_of: "2026-10-16 / CI-only scanner caught what the local gate missed (gitleaks fixtures)"
   disposition: upheld
   finding: "CodeQL scans test code too and the main-code-scanning ruleset blocks a new high alert anywhere: no nested quantifiers whose inner class can also match the separator (e.g. `(?:\\s+.*\\n)*?`, where \\s matches \\n). Check structured text (YAML) with a line scan or a declared parser, not a multi-line regex."
+
+- date: 2026-10-16
+  source: "release-0-4-0 / README.md:467,474 / security-auditor (MEDIUM)"
+  importance: 3
+  mechanizable: yes
+  scope: unclassified
+  category: security
+  module: "README.md"
+  tags: [supply-chain, image-pin, digest, docs, release]
+  recurrence_of: "2026-10-15 / README docker run examples tag-only (release-0-3-0, LOW)"
+  disposition: upheld
+  finding: "Every copy-pasteable image reference (README examples included, not only deploy/) pins `:<version>@sha256:<digest>`; a release's pin step updates them with deploy/, and the pin test should cover them so they can't be left tag-only or stale."

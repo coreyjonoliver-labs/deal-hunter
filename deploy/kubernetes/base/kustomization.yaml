@@ -17,5 +17,5 @@ images:
   # The tag moves with every build of main; the digest is what's pinned.
   # Bump both together (see ../../README.md).
   - name: ghcr.io/coreyjonoliver-labs/deal-hunter
-    newTag: 0.3.0
-    digest: sha256:f18291acd3d93e2c6c50301796459f1b0aa565a5d3b40b41bdf9ddbd9b9256da
+    newTag: 0.4.0
+    digest: sha256:e673b9296c4796ca12f20780ddb6d70bf0cca88c9653244d8178070466e1d413
