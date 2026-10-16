@@ -4,6 +4,23 @@ A running, dated log of completed work. Append a new entry (newest at the top)
 each time a spec reaches `Complete` or a meaningful milestone lands. This is the
 project's memory between sessions — `session-start` surfaces the latest entry.
 
+## 2026-10-15 — release-0-3-0
+
+- Published `ghcr.io/coreyjonoliver-labs/deal-hunter:0.3.0@sha256:f18291ac…56da`
+  (Discord alerts, rating summaries with a fair price and forged-rating
+  protection, truthful search signal, configuration model). Version bump in
+  #10; the `main` build (run 38825869945) published and attested it from
+  merge commit `e0ce510`.
+- Strict `gh attestation verify` passed (signer `build.yml@refs/heads/main`,
+  source ref `refs/heads/main`, GitHub-hosted runner). `deploy/` (kustomize
+  base, the three `deployment.yaml` images, Compose) and the README examples
+  now name 0.3.0 and that digest.
+- Gate: code-reviewer + security-auditor, 0 findings above LOW; checks
+  enforced (747 tests, ruff, mypy, kustomize render). LOW: the README's
+  `docker run` examples are tag-only — folded into `immutable-release-tags`.
+  The `v0.3.0` GitHub release awaits the operator's go-ahead. aimm upgrade
+  deferred (`bump-aimm`, re-check around Oct 22).
+
 ## 2026-10-15 — discord-deal-alerts
 
 - `notify.methods = ["discord"]` posts each matching listing to a Discord
