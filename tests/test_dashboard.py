@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -657,3 +658,255 @@ def test_problems_come_from_real_search_outcomes(settings: Settings, home: Path)
         "No search results for watch 'nuc' phrase #1"
     ]
     assert problems["warnings_24h"] == 1 and problems["errors_24h"] == 0
+
+
+# --- /metrics ---------------------------------------------------------------------
+
+
+@pytest.fixture
+def metrics_server(settings: Settings, home: Path) -> Iterator[tuple[int, dashboard.SnapshotCache]]:
+    snapshots = dashboard.SnapshotCache(settings, home)
+    srv = dashboard.start_metrics_server(settings, snapshots, "127.0.0.1", 0)
+    yield srv.server_address[1], snapshots
+    srv.shutdown()
+    srv.server_close()
+
+
+def test_metrics_scrape_by_pod_ip(metrics_server: tuple[int, Any], home: Path) -> None:
+    port, _ = metrics_server
+    now = time.time()  # the scrape's own clock: later events would count as forged
+    events(
+        home,
+        *[
+            {
+                "ts": now - 100 + i,
+                "kind": "search_results",
+                "item": "nuc",
+                "phrase_index": i,
+                "count": c,
+            }
+            for i, c in enumerate([3, 0, 5, 2, 0, 1])
+        ],  # fmt: skip
+        {"ts": now - 90, "kind": "search_summary", "item": "nuc", "new_count": 0},
+    )
+    resp, body = get(port, "/metrics", host="10.1.2.3:9741")  # what Prometheus sends
+    text = body.decode()
+    assert resp.status == 200
+    assert resp.headers["Content-Type"] == "text/plain; version=0.0.4; charset=utf-8"
+    assert resp.headers["X-Content-Type-Options"] == "nosniff"
+    assert "deal_hunter_build_info{" in text
+    assert 'deal_hunter_searches_total{watch="nuc",outcome="failed"} 2' in text
+    assert 'deal_hunter_searches_total{watch="nuc",outcome="ok"} 4' in text
+    assert f"deal_hunter_last_success_timestamp_seconds {now - 90}" in text
+    assert 'deal_hunter_listings{state="fetched"} 5' in text
+
+
+@pytest.mark.parametrize("path", ["/", "/healthz", "/api/summary.json", "/?view=all", "/metrics/x"])
+def test_metrics_port_serves_nothing_else(metrics_server: tuple[int, Any], path: str) -> None:
+    port, _ = metrics_server
+    resp, body = get(port, path, host="10.1.2.3:9741")
+    assert resp.status == 404
+    assert b"<" not in body and b"Beelink" not in body
+
+
+def test_metrics_port_methods_and_head(metrics_server: tuple[int, Any]) -> None:
+    port, _ = metrics_server
+    assert get(port, "/metrics", method="POST")[0].status == 501
+    resp, body = get(port, "/metrics", method="HEAD")
+    assert resp.status == 200 and body == b""
+
+
+def test_dashboard_port_still_enforces_host_and_has_no_metrics(server: int) -> None:
+    assert get(server, "/metrics")[0].status == 404
+    assert get(server, "/", host="10.1.2.3:8740")[0].status == 421
+
+
+def test_dashboard_and_metrics_share_one_snapshot_cache(
+    settings: Settings, home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[int] = []
+    real = dashboard.collect
+
+    def counting(*args: Any) -> Any:
+        calls.append(1)
+        return real(*args)
+
+    monkeypatch.setattr(dashboard, "collect", counting)
+    snapshots = dashboard.SnapshotCache(settings, home)
+    hosts = dashboard.allowed_hosts("127.0.0.1", [])
+    from http.server import ThreadingHTTPServer
+
+    page = ThreadingHTTPServer(
+        ("127.0.0.1", 0), dashboard.make_handler(settings, home, hosts, snapshots)
+    )
+    threading.Thread(target=page.serve_forever, daemon=True).start()
+    srv = dashboard.start_metrics_server(settings, snapshots, "127.0.0.1", 0)
+    try:
+        assert get(page.server_address[1], "/")[0].status == 200
+        assert get(srv.server_address[1], "/metrics")[0].status == 200
+        assert get(srv.server_address[1], "/metrics")[0].status == 200
+    finally:
+        page.shutdown()
+        page.server_close()
+        srv.shutdown()
+        srv.server_close()
+    assert len(calls) == 1  # one read of the cache for the page and both scrapes
+
+
+def test_a_broken_snapshot_still_answers_without_a_trace(
+    settings: Settings, home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def boom(*args: Any) -> Any:
+        raise RuntimeError("/home/secret/path exploded")
+
+    monkeypatch.setattr(dashboard, "collect", boom)
+    srv = dashboard.start_metrics_server(
+        settings, dashboard.SnapshotCache(settings, home), "127.0.0.1", 0
+    )
+    try:
+        resp, body = get(srv.server_address[1], "/metrics")
+    finally:
+        srv.shutdown()
+        srv.server_close()
+    assert resp.status == 200
+    assert b"deal_hunter_cache_read_errors 1" in body
+    assert b"secret" not in body and b"Traceback" not in body
+
+
+def test_metrics_are_fast_on_a_big_cache(base_settings: dict[str, Any], tmp_path: Path) -> None:
+    import time
+
+    base_settings["search"] = {}
+    base_settings["watch"] = [{"name": "desk", "search_phrases": ["desk"], "max_price": 900}]
+    base_settings["facebook"] = {"session_file": str(tmp_path / "fb.json")}
+    settings = parse_settings(base_settings)
+    home = tmp_path / "big"
+    home.mkdir()
+    with Cache(str(home)) as cache:
+        for n in range(20_000):
+            put(cache, listing(str(n), f"Standing desk number {n}"), None)  # MAX_ROWS rows
+    snapshots = dashboard.SnapshotCache(settings, home)
+    srv = dashboard.start_metrics_server(settings, snapshots, "127.0.0.1", 0)
+    try:
+        started = time.perf_counter()
+        resp, body = get(srv.server_address[1], "/metrics")
+        first = time.perf_counter() - started
+        assert snapshots.latest(60) is not None
+        started = time.perf_counter()
+        resp, body = get(srv.server_address[1], "/metrics")
+        warm = time.perf_counter() - started
+    finally:
+        srv.shutdown()
+        srv.server_close()
+    assert resp.status == 200 and b'deal_hunter_listings{state="fetched"} 20000' in body
+    assert first < 2.0 and warm < 2.0
+
+
+def test_a_slow_read_does_not_hold_a_scrape(
+    settings: Settings, home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import time
+
+    snapshots = dashboard.SnapshotCache(settings, home)
+    first = snapshots.latest(30)
+    assert first is not None  # nothing slow yet
+    release = threading.Event()
+    real = dashboard.collect
+
+    def slow(*args: Any) -> Any:
+        release.wait(30)
+        return real(*args)
+
+    monkeypatch.setattr(dashboard, "collect", slow)
+    events(home, {"ts": NOW, "kind": "warning", "message": "new"})  # the files changed
+    started = time.perf_counter()
+    assert snapshots.latest(0.05) is first  # the previous snapshot, not a wait
+    assert time.perf_counter() - started < 1.0
+    release.set()
+    newer = snapshots.latest(30)
+    assert newer is not first and newer is not None
+
+
+def test_a_scrape_before_the_first_snapshot_exists_gets_the_stub(
+    settings: Settings, home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    release = threading.Event()
+    real = dashboard.collect
+    monkeypatch.setattr(dashboard, "collect", lambda *a: (release.wait(30), real(*a))[1])
+    snapshots = dashboard.SnapshotCache(settings, home)
+    srv = dashboard.start_metrics_server(settings, snapshots, "127.0.0.1", 0)
+    monkeypatch.setattr(dashboard, "SCRAPE_WAIT_S", 0.05)
+    try:
+        _, body = get(srv.server_address[1], "/metrics")
+        assert b"deal_hunter_cache_read_errors 1" in body
+    finally:
+        release.set()
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_a_failed_refresh_after_a_good_snapshot_is_reported(
+    settings: Settings,
+    home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    snapshots = dashboard.SnapshotCache(settings, home)
+    srv = dashboard.start_metrics_server(settings, snapshots, "127.0.0.1", 0)
+    port = srv.server_address[1]
+    try:
+        assert snapshots.latest(30) is not None
+        _, body = get(port, "/metrics")
+        assert b"deal_hunter_cache_read_errors 0" in body
+
+        def boom(*args: Any) -> Any:
+            raise RuntimeError("/home/secret/path exploded")
+
+        monkeypatch.setattr(dashboard, "collect", boom)
+        events(home, {"ts": NOW, "kind": "warning", "message": "changed"})
+        for _ in range(2):
+            _, body = get(port, "/metrics")
+            assert b"deal_hunter_cache_read_errors 1" in body
+            assert b'deal_hunter_listings{state="fetched"} 5' in body  # the last good snapshot
+            assert b"secret" not in body
+    finally:
+        srv.shutdown()
+        srv.server_close()
+    assert snapshots.last_error == "RuntimeError"
+    err = capsys.readouterr().err
+    assert err.count("RuntimeError") == 1 and "secret" not in err  # said once, class only
+
+
+@pytest.mark.parametrize("host", ["10.0.0.5:9741", "[::1]:9741", "10.0.0.5", "127.0.0.1:1"])
+def test_metrics_serves_ip_literal_hosts(metrics_server: tuple[int, Any], host: str) -> None:
+    assert get(metrics_server[0], "/metrics", host=host)[0].status == 200
+
+
+@pytest.mark.parametrize("host", ["evil.example", "evil.example:9741", "10.0.0.5.evil.example", ""])
+def test_metrics_refuses_other_hosts(metrics_server: tuple[int, Any], host: str) -> None:
+    for path in ("/metrics", "/"):
+        assert get(metrics_server[0], path, host=host or "x y")[0].status == 403
+
+
+def test_metrics_serves_the_dashboards_allowed_host_names(settings: Settings, home: Path) -> None:
+    snapshots = dashboard.SnapshotCache(settings, home)
+    hosts = dashboard.allowed_hosts("127.0.0.1", ["nuc.example.lan"])
+    srv = dashboard.start_metrics_server(settings, snapshots, "127.0.0.1", 0, hosts)
+    try:
+        assert get(srv.server_address[1], "/metrics", host="nuc.example.lan:9741")[0].status == 200
+        assert get(srv.server_address[1], "/metrics", host="evil.example")[0].status == 403
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_a_future_event_cannot_make_the_monitor_look_running(
+    settings: Settings, home: Path
+) -> None:
+    events(
+        home,
+        {"ts": NOW - 10 * 86_400, "kind": "search_summary", "item": "nuc", "new_count": 0},
+        {"ts": NOW + 86_400, "kind": "search_summary", "item": "nuc", "new_count": 0},
+    )
+    snap = dashboard.collect(settings, home, NOW)
+    assert dashboard.status(snap, settings).label == "Stalled or stopped"

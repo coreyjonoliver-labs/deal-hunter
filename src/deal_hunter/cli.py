@@ -94,13 +94,26 @@ def main(argv: list[str] | None = None) -> int:
 
     p_web = sub.add_parser("web", help="serve a page with results and monitor status")
     p_web.add_argument("--host", default="127.0.0.1", help="address to listen on")
-    p_web.add_argument("--port", type=int, default=8740)
+    p_web.add_argument("--port", type=_port, default=8740)
     p_web.add_argument(
         "--allow-host",
         action="append",
         default=[],
         metavar="NAME",
         help="extra Host name to answer to, e.g. behind a reverse proxy (repeatable)",
+    )
+    p_web.add_argument(
+        "--metrics-port",
+        type=_port,
+        default=None,
+        metavar="PORT",
+        help="also serve Prometheus metrics on PORT (GET /metrics only; off by default)",
+    )
+    p_web.add_argument(
+        "--metrics-host",
+        default=None,
+        metavar="HOST",
+        help="address for --metrics-port (default: --host)",
     )
 
     args = parser.parse_args(argv)
@@ -127,7 +140,14 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "notify-test":
             return _notify_test(args.settings)
         if args.command == "web":
-            return _web(args.settings, args.host, args.port, args.allow_host)
+            return _web(
+                args.settings,
+                args.host,
+                args.port,
+                args.allow_host,
+                args.metrics_port,
+                args.metrics_host,
+            )
         return _run(
             args.settings,
             args.output,
@@ -230,11 +250,32 @@ _QUIET.addHandler(logging.NullHandler())
 _QUIET.propagate = False
 
 
-def _web(settings_path: Path, host: str, port: int, allow_hosts: list[str]) -> int:
+def _port(text: str) -> int:
+    """An argparse type: a TCP port, 1-65535 (argparse reports the error and exits 2)."""
+    try:
+        port = int(text)
+    except ValueError:
+        port = 0
+    if not 1 <= port <= 65535:
+        raise argparse.ArgumentTypeError(f"port must be a number from 1 to 65535, not {text!r}")
+    return port
+
+
+def _web(
+    settings_path: Path,
+    host: str,
+    port: int,
+    allow_hosts: list[str],
+    metrics_port: int | None = None,
+    metrics_host: str | None = None,
+) -> int:
     from deal_hunter.dashboard import LOOPBACK, serve
     from deal_hunter.session import AIMM_HOME
 
     settings = load_settings(settings_path)
+    if metrics_port is not None and (metrics_host or host) == host and metrics_port == port:
+        print("deal-hunter: --metrics-port must differ from --port.", file=sys.stderr)
+        return 2
     if host not in LOOPBACK:
         print(
             f"warning: serving on {host}. The page has no login: anyone who can reach it "
@@ -242,11 +283,19 @@ def _web(settings_path: Path, host: str, port: int, allow_hosts: list[str]) -> i
             "authenticating proxy.",
             file=sys.stderr,
         )
+    if metrics_port is not None and metrics_host and metrics_host not in LOOPBACK:
+        print(
+            f"warning: serving metrics on {metrics_host}. The metrics port has no login: "
+            "anyone who can reach it sees your search counts and AI spend. Limit it to your "
+            "scraper (a NetworkPolicy or firewall).",
+            file=sys.stderr,
+        )
     try:
-        serve(settings, AIMM_HOME, host, port, allow_hosts)
+        serve(settings, AIMM_HOME, host, port, allow_hosts, metrics_port, metrics_host)
     except OSError as e:
         print(
-            f"deal-hunter: can't listen on {host}:{port}: {e.strerror}. Try --port.",
+            f"deal-hunter: can't listen on {host}:{port} (or the metrics port): {e.strerror}. "
+            "Try --port or --metrics-port.",
             file=sys.stderr,
         )
         return 1

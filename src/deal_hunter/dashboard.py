@@ -9,6 +9,9 @@ Everything comes from files the monitor writes in aimm's home:
 - the saved Facebook session's metadata: when it was saved and when its
   login cookie expires. Never its contents.
 
+With ``--metrics-port`` it also serves Prometheus metrics (metrics.py) on a
+second port, from the same snapshots.
+
 The page has no login, so it's served on 127.0.0.1 only unless told
 otherwise, and rejects requests whose Host header isn't one it serves
 (DNS rebinding). It runs no scripts, and seller text is HTML-escaped.
@@ -21,6 +24,7 @@ import functools
 import hashlib
 import html
 import io
+import ipaddress
 import json
 import os
 import pickle  # noqa: S403 — restricted to plain data, see _PlainUnpickler
@@ -60,6 +64,9 @@ PRICES = {
     "gpt-4o": (2.5, 10.0),
 }
 DAY = 86_400
+# How long a scrape waits for a refresh of the snapshot before answering with the last one.
+SCRAPE_WAIT_S = 1.5
+FUTURE_SLACK_S = 300  # an event stamped later than now by more than this is forged
 MAX_TS = 4_102_444_800  # 2100-01-01: anything later is junk, not a date
 # A search can run late by this much before the monitor counts as stalled.
 STALL_GRACE_S = 30 * 60
@@ -376,8 +383,15 @@ class Status:
 
 
 def status(snap: Snapshot, settings: Settings) -> Status:
-    starts = [e["ts"] for e in snap.events if e.get("kind") == "browser_ready"]
-    searches = [e["ts"] for e in snap.events if e.get("kind") == "search_summary"]
+    # Not from the future: the events file is the monitor's, so one forged line
+    # must not make a dead monitor look like it just searched.
+    latest = snap.now + FUTURE_SLACK_S
+    starts = [
+        e["ts"] for e in snap.events if e.get("kind") == "browser_ready" and e["ts"] <= latest
+    ]
+    searches = [
+        e["ts"] for e in snap.events if e.get("kind") == "search_summary" and e["ts"] <= latest
+    ]
     if not starts and not searches:
         return Status(
             "No activity yet",
@@ -882,6 +896,9 @@ class SnapshotCache:
         self.snap: Snapshot | None = None
         self.at = 0.0
         self.memo: dict[tuple[str, ...], dict[str, list[str]]] = {}
+        self._flight = threading.Lock()
+        self._refresher: threading.Thread | None = None
+        self.last_error: str | None = None
 
     def _key(self) -> tuple[Any, ...]:
         paths = [self.home / "cache.db", self.home / "cache.db-wal", events_path(self.home)]
@@ -904,6 +921,42 @@ class SnapshotCache:
                 # A change during the read is picked up within MAX_AGE_S.
                 self.key, self.at = self._key(), now
             return self.snap
+
+    def latest(self, wait_s: float = SCRAPE_WAIT_S) -> Snapshot | None:
+        """A snapshot without waiting on a slow read, for scrapers (None if none yet).
+
+        Reading a very large cache the first time (matching every listing against
+        the watches' keywords) can take far longer than a scrape may. This starts
+        one refresh in the background (get() decides whether anything changed),
+        waits up to wait_s for it, and returns the newest snapshot built so far,
+        which is the previous one if the refresh is still running.
+        """
+        with self._flight:
+            thread = self._refresher
+            if thread is None or not thread.is_alive():
+                thread = self._refresher = threading.Thread(
+                    target=self._refresh, name="snapshot", daemon=True
+                )
+                thread.start()
+        thread.join(wait_s)
+        return self.snap
+
+    def _refresh(self) -> None:
+        try:
+            self.get()
+        except Exception as e:  # noqa: BLE001 — the scrape serves what it has; the next one retries
+            self.report(type(e).__name__)
+        else:
+            self.last_error = None
+
+    def report(self, error: str) -> None:
+        """Remember that the metrics snapshot is stale; say so on stderr once per outage.
+
+        Only the exception class: its message can hold paths.
+        """
+        if self.last_error is None:
+            print(f"deal-hunter: couldn't refresh the metrics snapshot: {error}", file=sys.stderr)
+        self.last_error = error
 
 
 class BoundedServer(ThreadingHTTPServer):
@@ -929,8 +982,10 @@ class BoundedServer(ThreadingHTTPServer):
             self.slots.release()
 
 
-def make_handler(settings: Settings, home: Path, hosts: set[str]) -> type[BaseHTTPRequestHandler]:
-    snapshots = SnapshotCache(settings, home)
+def make_handler(
+    settings: Settings, home: Path, hosts: set[str], snapshots: SnapshotCache | None = None
+) -> type[BaseHTTPRequestHandler]:
+    cache = snapshots or SnapshotCache(settings, home)
 
     class Handler(BaseHTTPRequestHandler):
         timeout = 15  # seconds a client may take to send its request
@@ -965,7 +1020,7 @@ def make_handler(settings: Settings, home: Path, hosts: set[str]) -> type[BaseHT
             if url.path not in ("/", "/api/summary.json"):
                 self.send(HTTPStatus.NOT_FOUND, "text/plain", b"Not found\n", head)
                 return
-            snap = snapshots.get()
+            snap = cache.get()
             if url.path == "/":
                 query = parse_qs(url.query)
                 view = query.get("view", ["matches"])[0]
@@ -1011,12 +1066,115 @@ def make_handler(settings: Settings, home: Path, hosts: set[str]) -> type[BaseHT
     return Handler
 
 
+def metrics_host_ok(header: str | None, hosts: set[str]) -> bool:
+    """An IP literal (a scraper uses the pod's IP) or one of the dashboard's host names."""
+    host = host_of(header)
+    if host is None:
+        return False
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return host in hosts
+    return True
+
+
+def make_metrics_handler(
+    settings: Settings, snapshots: SnapshotCache, hosts: set[str]
+) -> type[BaseHTTPRequestHandler]:
+    """GET /metrics and nothing else: no dashboard content.
+
+    The scraper sends the pod's IP as Host, which the dashboard refuses, so
+    metrics have their own port (opt-in, so a NetworkPolicy can admit a
+    scraper to it without admitting it to the dashboard). Host must be an IP
+    literal or one of the dashboard's names: a web page can only reach this
+    port through a DNS-rebound name, which is neither (403). What it serves
+    carries no listing text, phrase, location or secret (metrics.py), and
+    shares the dashboard's snapshot, so a scrape reads no more than a refresh.
+    """
+    from deal_hunter import metrics
+
+    class Handler(BaseHTTPRequestHandler):
+        timeout = 15
+        protocol_version = "HTTP/1.1"
+
+        def version_string(self) -> str:
+            return "deal-hunter"
+
+        def do_HEAD(self) -> None:  # noqa: N802
+            self.do_GET(head=True)
+
+        def do_GET(self, head: bool = False) -> None:  # noqa: N802
+            if not metrics_host_ok(self.headers.get("Host"), hosts):
+                self.send(HTTPStatus.FORBIDDEN, "text/plain", b"Unknown host\n", head)
+                return
+            if urlparse(self.path).path != "/metrics":
+                self.send(HTTPStatus.NOT_FOUND, "text/plain", b"Not found\n", head)
+                return
+            try:
+                snap = snapshots.latest()
+                body = (
+                    metrics.render(snap, settings, snapshots.last_error is not None)
+                    if snap is not None
+                    else metrics.render_unavailable(settings)
+                )
+            except Exception as e:  # noqa: BLE001 — a broken snapshot must not become a stack trace
+                snapshots.report(type(e).__name__)
+                body = metrics.render_unavailable(settings)
+            self.send(HTTPStatus.OK, metrics.CONTENT_TYPE, body.encode(), head)
+
+        def send(self, code: HTTPStatus, kind: str, body: bytes, head: bool) -> None:
+            self.send_response(code)
+            self.send_header("Content-Type", kind)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Connection", "close")
+            for name, value in _STATIC_HEADERS.items():
+                self.send_header(name, value)
+            self.end_headers()
+            if not head:
+                self.wfile.write(body)
+
+        def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
+            pass  # quiet: Prometheus scrapes every few seconds
+
+    return Handler
+
+
+def start_metrics_server(
+    settings: Settings,
+    snapshots: SnapshotCache,
+    host: str,
+    port: int,
+    hosts: set[str] | None = None,
+) -> BoundedServer:
+    """Serve /metrics on its own port in a background thread; the caller closes it."""
+    hosts = allowed_hosts(host, ()) if hosts is None else hosts
+    server = BoundedServer((host, port), make_metrics_handler(settings, snapshots, hosts))
+    snapshots.latest(0)  # start the first read now: a large cache takes a while
+    threading.Thread(target=server.serve_forever, name="metrics", daemon=True).start()
+    return server
+
+
 def serve(
-    settings: Settings, home: Path, host: str, port: int, extra_hosts: Iterable[str] = ()
+    settings: Settings,
+    home: Path,
+    host: str,
+    port: int,
+    extra_hosts: Iterable[str] = (),
+    metrics_port: int | None = None,
+    metrics_host: str | None = None,
 ) -> None:
     import_aimm_without_cache()
     hosts = allowed_hosts(host, extra_hosts)
-    server = BoundedServer((host, port), make_handler(settings, home, hosts))
+    snapshots = SnapshotCache(settings, home)
+    server = BoundedServer((host, port), make_handler(settings, home, hosts, snapshots))
+    metrics_server = None
+    if metrics_port is not None:
+        metrics_server = start_metrics_server(
+            settings, snapshots, metrics_host or host, metrics_port, hosts
+        )
+        bound_host, bound_port = str(metrics_server.server_address[0]), metrics_server.server_port
+        shown = f"[{bound_host}]" if ":" in bound_host else bound_host
+        print(f"deal-hunter metrics on http://{shown}:{bound_port}/metrics", flush=True)
     shown = f"[{host}]" if ":" in host else host
     print(f"deal-hunter dashboard on http://{shown}:{server.server_address[1]}/", flush=True)
     try:
@@ -1025,3 +1183,6 @@ def serve(
         pass
     finally:
         server.server_close()
+        if metrics_server is not None:
+            metrics_server.shutdown()
+            metrics_server.server_close()
