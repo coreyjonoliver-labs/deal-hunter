@@ -22,7 +22,7 @@ Objective: what `deploy/` ships is exactly what was reviewed and published.
 | [investigate-search-failures](specs/investigate-search-failures.md) | None | Complete |
 | [rating-summary-format](specs/rating-summary-format.md) | None | Complete |
 | [release-0-3-0](specs/release-0-3-0.md) | None | Complete |
-| [release-0-4-0](specs/release-0-4-0.md) | ops-metrics, otel-tracing | In Progress |
+| [release-0-4-0](specs/release-0-4-0.md) | ops-metrics, otel-tracing | Complete |
 | bump-aimm (deferred) | None | — |
 | immutable-release-tags | None | — |
 

@@ -391,7 +391,7 @@ may be lost.
 The `Dockerfile` builds one image for both `run` and `web` (CI publishes it to
 `ghcr.io/<owner>/deal-hunter:<version>` with signed build provenance). The tag
 is the package version and moves with every build of `main`, so pin the
-digest (`:0.3.0@sha256:…`). It runs as uid 1000, works with a read-only root
+digest (`:0.4.0@sha256:…`). It runs as uid 1000, works with a read-only root
 filesystem, and keeps nothing in the image: settings, keys and state come
 from outside. Under Kubernetes, run it as uid/gid 1000 with `fsGroup: 1000`
 so it can write its volumes.
@@ -464,14 +464,16 @@ docker run -d --name deal-hunter --read-only --cap-drop ALL --tmpfs /tmp \
   -v hunter-aimm:/home/hunter/.ai-marketplace-monitor -v hunter-session:/session \
   -v ~/.ai-marketplace-monitor/facebook-session.json:/seed/facebook-session.json:ro \
   -v "$PWD/deal-hunter.toml:/config/deal-hunter.toml:ro" -e ANTHROPIC_API_KEY \
-  ghcr.io/<owner>/deal-hunter:0.3.0 -s /config/deal-hunter.toml run \
+  ghcr.io/coreyjonoliver-labs/deal-hunter:0.4.0@sha256:e673b9296c4796ca12f20780ddb6d70bf0cca88c9653244d8178070466e1d413 \
+  -s /config/deal-hunter.toml run \
   -o /work/build/aimm-config.toml \
   --session-seed /seed/facebook-session.json --wait-for-session 900 --restart-after 900
 
 docker run -d --name deal-hunter-web --read-only --cap-drop ALL --tmpfs /tmp \
   -v hunter-aimm:/home/hunter/.ai-marketplace-monitor:ro \
   -v "$PWD/deal-hunter.toml:/config/deal-hunter.toml:ro" -p 127.0.0.1:8740:8740 \
-  ghcr.io/<owner>/deal-hunter:0.3.0 -s /config/deal-hunter.toml \
+  ghcr.io/coreyjonoliver-labs/deal-hunter:0.4.0@sha256:e673b9296c4796ca12f20780ddb6d70bf0cca88c9653244d8178070466e1d413 \
+  -s /config/deal-hunter.toml \
   web --host 0.0.0.0 --allow-host 127.0.0.1
 ```
 

@@ -36,7 +36,7 @@ spec each.
   otel-tracing)
 - [x] otel-tracing — OTLP traces per search cycle with an attribute allowlist,
   off by default; builds on ops-metrics' notification/search events
-- [ ] release-0-4-0 — publish 0.4.0 (Prometheus metrics, OpenTelemetry
+- [x] release-0-4-0 — publish 0.4.0 (Prometheus metrics, OpenTelemetry
   tracing): version bump → main publishes + attests → strict verify + image
   smoke check → pin the digest in `deploy/` in a follow-up
 
@@ -86,14 +86,20 @@ spec each.
   can publish and attest today; so can any pushed branch that edits
   `build.yml`'s trigger, so the fix must live outside the workflow — an
   environment-scoped publish credential limited to `main`, or registry-side
-  immutable tags) (workflow change: operator-only). Until then
-  the README's `docker run` examples pull by tag only (`:0.3.0`), so a paste
-  gets the latest `main` build; show `:<version>@sha256:<digest>` with a
-  pointer to the verify step in `deploy/README.md`
+  immutable tags) (workflow change: operator-only). The README's
+  `docker run` examples pin `:<version>@sha256:<digest>` since 0.4.0, but
+  `tests/test_deploy.py` doesn't check them, so a release can leave them
+  behind; check them there too, and point them at the verify step in
+  `deploy/README.md`
 - [ ] verify-pins-in-ci — a CI step that runs the strict
   `gh attestation verify` on the digest pinned in `deploy/`, so a pinning PR
   can't merge an unattested or branch-built digest (workflow change:
-  operator-only)
+  operator-only). Add `--source-digest <bump merge SHA>` so the check binds
+  the pin to the reviewed commit, not just any `main` build
+- [ ] multiarch-image — the image is published for linux/amd64 only, so
+  Compose on Apple Silicon or an arm64 board needs `--platform linux/amd64`
+  and emulation; build linux/arm64 too, with provenance for both (workflow
+  change: operator-only)
 - [ ] scoped-agent-token — agent sessions run `gh` unsandboxed with the
   operator's admin token, which can change branch protection, dispatch
   workflows and merge; `permissions.ask` prompts are only a speed bump. Give

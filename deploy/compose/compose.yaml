@@ -22,7 +22,7 @@ name: deal-hunter
 
 x-hardening: &hardening
   # The tag moves; the digest is what's pinned. Bump both together (see ../README.md).
-  image: ghcr.io/coreyjonoliver-labs/deal-hunter:0.3.0@sha256:f18291acd3d93e2c6c50301796459f1b0aa565a5d3b40b41bdf9ddbd9b9256da
+  image: ghcr.io/coreyjonoliver-labs/deal-hunter:0.4.0@sha256:e673b9296c4796ca12f20780ddb6d70bf0cca88c9653244d8178070466e1d413
   read_only: true
   cap_drop: [ALL]
   security_opt: [no-new-privileges:true]

@@ -4,6 +4,24 @@ A running, dated log of completed work. Append a new entry (newest at the top)
 each time a spec reaches `Complete` or a meaningful milestone lands. This is the
 project's memory between sessions — `session-start` surfaces the latest entry.
 
+## 2026-10-16 — release-0-4-0
+
+- Published `ghcr.io/coreyjonoliver-labs/deal-hunter:0.4.0@sha256:e673b929…d413`
+  (Prometheus metrics, OpenTelemetry tracing, `notification` events). Version
+  bump in #17; the `main` build (run 38952499436) published and attested it
+  from merge commit `3fe981a`, the only `main` build since the bump.
+- Strict `gh attestation verify` passed (signer `build.yml@refs/heads/main`,
+  source ref `refs/heads/main`, GitHub-hosted runner). Image check (amd64):
+  `opentelemetry.sdk` imports and `web --help` lists `--metrics-port`.
+- `deploy/` (kustomize base, the three `deployment.yaml` images, Compose) and
+  the README now name 0.4.0 and that digest; the README's `docker run`
+  examples now pin the digest too, not just the tag.
+- Gate: code-reviewer + security-auditor, no CRITICAL/HIGH; checks enforced
+  (1061 tests, ruff, mypy, kustomize render). `:0.3.0` on GHCR now serves
+  post-0.3.0 code (`fbe1c277…`); the real 0.3.0 is `f18291ac…56da`. New
+  backlog: `multiarch-image`; `verify-pins-in-ci` gains `--source-digest`.
+  The `v0.4.0` GitHub release (tag on `3fe981a`) awaits the operator.
+
 ## 2026-10-16 — otel-tracing
 
 - `run` exports OpenTelemetry traces over OTLP/HTTP when
