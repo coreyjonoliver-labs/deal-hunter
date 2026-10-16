@@ -11,6 +11,7 @@ resources:
 components:
   - ../components/kata           # drop if you have no Kata (or gVisor) runtime
   - ../components/cilium-egress  # drop if your CNI isn't Cilium
+  - ../components/prometheus     # drop if you have no Prometheus Operator (also drop --metrics-port below)
 configMapGenerator:
   - name: deal-hunter-config
     files:
@@ -22,7 +23,8 @@ configMapGenerator:
 patches:
   # The host name your authenticating proxy serves the dashboard on. This
   # replaces the whole list: keep it in step with base/deployment.yaml's
-  # web args when you update the base.
+  # web args when you update the base, and keep --metrics-port with the
+  # prometheus component (the replacement drops the arguments it adds).
   - patch: |-
       apiVersion: apps/v1
       kind: Deployment
@@ -41,5 +43,7 @@ patches:
                   - 0.0.0.0
                   - --port
                   - "8740"
+                  - --metrics-port
+                  - "9741"
                   - --allow-host
                   - deal-hunter.example.com

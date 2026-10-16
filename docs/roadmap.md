@@ -41,13 +41,14 @@ radius for a compromised browser.
 
 Objective: the buyer hears about good deals where they already look. For now
 alerting is scoped to that (operator decision, 2026-10-15); the operator-health
-specs (ops-metrics, otel-tracing) are written and deferred.
+specs (ops-metrics, otel-tracing) were written and deferred, then picked up
+on 2026-10-16 (operator decision: ops-metrics first, then otel-tracing).
 
 | Spec | Depends on | Status |
 |---|---|---|
 | [discord-deal-alerts](specs/discord-deal-alerts.md) | None | Complete |
-| [ops-metrics](specs/ops-metrics.md) | None | Ready (deferred) |
-| [otel-tracing](specs/otel-tracing.md) | ops-metrics | Ready (deferred) |
+| [ops-metrics](specs/ops-metrics.md) | None | Complete |
+| [otel-tracing](specs/otel-tracing.md) | ops-metrics | Ready |
 
 <!--
 Add phases as the project grows. A phase is just a grouping for sequencing; the

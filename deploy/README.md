@@ -11,10 +11,16 @@ This directory has starting points for running it unattended:
   (or gVisor: change the RuntimeClass name).
 - `kubernetes/components/cilium-egress/`: a host-name egress allowlist and a
   node deny on the dashboard port, for clusters running Cilium.
+- `kubernetes/components/prometheus/`: Prometheus metrics for any Prometheus
+  Operator setup: a metrics port, a ServiceMonitor, alert rules (with
+  `promtool` tests). See [Metrics and alerts](#metrics-and-alerts).
 - `kubernetes/example/`: an overlay that puts them together. Copy it, fill in
   the settings, the image digest and the dashboard's host name, create the
   two Secrets named in `base/deployment.yaml`, then
   `kubectl apply -k <your overlay>`.
+
+The base Service exposes the dashboard port only; the `prometheus` component
+adds a second port for metrics.
 
 Exposing the dashboard (an Ingress and an authenticating proxy) is left to
 your cluster, since it depends on your ingress controller and login setup.
@@ -132,3 +138,45 @@ The base NetworkPolicy can only say "HTTPS to public addresses", so the
 browser can still reach any public site. Add the `cilium-egress` component
 on Cilium, or your CNI's or firewall's equivalent (Calico's DNS policies, an
 egress proxy), to narrow it to the hosts above.
+
+## Metrics and alerts
+
+`kubernetes/components/prometheus/` turns on `deal-hunter web --metrics-port
+9741` and adds:
+
+- a `metrics` port on the Pod and the Service (`9741`, `/metrics` only; see the
+  main README for the metric list and the counter-reset note);
+- a NetworkPolicy ingress rule on `9741` from namespaces labelled
+  `deal-hunter/metrics-access=true`. Label the namespace your Prometheus runs
+  in. The dashboard port keeps its own rule (`deal-hunter/dashboard-access`),
+  so admitting the scraper to metrics doesn't admit it to the dashboard, and
+  the metrics port serves nothing but `/metrics`. On Cilium, the host
+  entities aren't denied on `9741` (they are on `8740`): the metrics hold no
+  listing text, phrase, location or secret, but narrow it if you disagree;
+- a `ServiceMonitor` (60 s interval) and a `PrometheusRule`. Your Prometheus
+  must select them (many installs need a `release: <name>` label on both: add
+  it from your overlay with `labels:`) and be allowed to reach the pod. Add
+  the component to your overlay's `components:`, and keep `--metrics-port
+  9741` in the `web` args if your overlay replaces them, as the example does
+  for `--allow-host`: a replacement drops the argument the component adds.
+
+The rules, in `prometheusrule.yaml`:
+
+| Alert | Severity | Fires when |
+|---|---|---|
+| `DealHunterSearchStalled` | critical | no search round returned listings for longer than the configured `max_interval` plus 30 minutes, or the heartbeat metric is missing (10 minutes) |
+| `DealHunterSessionExpiringSoon` | warning | the Facebook login cookie expires within 3 days |
+| `DealHunterSessionExpired` | critical | the cookie has expired, or no session was ever saved (never for `facebook.anonymous`) |
+| `DealHunterSearchFailures` | warning | more than 50% of phrase searches returned nothing over an hour, with at least 4 searches |
+| `DealHunterAISpendHigh` | warning | estimated AI spend over 24 hours is above the threshold in the rule (default $1.00; the one number to change) |
+
+These alerts are computed from files the monitor writes (its cache and
+events file), so they are an operations aid, not a security control: under the
+untrusted-browser model a compromised monitor can forge them or keep them quiet.
+
+The rules set only a `severity` label. The heartbeat follows the
+`<app>_last_success_timestamp_seconds` convention, so a generic "heartbeat
+stale" rule in your monitoring setup can cover it too. Test the rules with
+`promtool test rules` (`tests/test_deploy.py` runs `rules.test.yaml` when
+`promtool` is installed), and render the example with
+`kustomize build deploy/kubernetes/example`.

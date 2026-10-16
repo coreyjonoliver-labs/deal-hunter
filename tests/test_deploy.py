@@ -13,7 +13,11 @@ known keys (the kustomizations' `images:` entries, the Compose and Deployment
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 IMAGE = "ghcr.io/coreyjonoliver-labs/deal-hunter"
@@ -334,3 +338,92 @@ def test_swapped_key_order_reports_the_real_tag() -> None:
 
 def test_non_numeric_package_version_fails_loudly() -> None:
     assert any(p.startswith(PYPROJECT) for p in check_pins(GOOD, "1.3.0rc1"))
+
+
+# --- The Prometheus component ---------------------------------------------------
+
+PROMETHEUS = ROOT / "deploy/kubernetes/components/prometheus"
+ALERTS = [
+    "DealHunterSearchStalled",
+    "DealHunterSessionExpiringSoon",
+    "DealHunterSessionExpired",
+    "DealHunterSearchFailures",
+    "DealHunterAISpendHigh",
+]
+
+
+def rules_file(prometheusrule: str) -> str:
+    """The PrometheusRule's `spec:` as a plain Prometheus rules file (dedented by two)."""
+    _, found, spec = prometheusrule.partition("\nspec:\n")
+    assert found, "no spec: in prometheusrule.yaml"
+    return "".join(line[2:] if line.startswith("  ") else line for line in spec.splitlines(True))
+
+
+def test_prometheus_rules_define_the_alerts_once_each() -> None:
+    rules = rules_file((PROMETHEUS / "prometheusrule.yaml").read_text())
+    assert rules.startswith("groups:\n")
+    assert re.findall(r"^\s*- alert: (\w+)$", rules, re.MULTILINE) == ALERTS
+    # Severity is the only label a rule sets: nothing from a listing, phrase or location.
+    labels = re.findall(r"^\s+labels:\n((?:\s+\w+: .*\n)+)", rules, re.MULTILINE)
+    assert len(labels) == len(ALERTS)
+    assert all(re.fullmatch(r"\s+severity: (critical|warning)\n", block) for block in labels)
+    # The spend threshold is set in one place, next to its comment.
+    assert len(re.findall(r"> 1\.00$", rules, re.MULTILINE)) == 1
+    assert "THE KNOB" in rules
+
+
+def test_prometheus_component_exposes_only_the_metrics_port() -> None:
+    kustomization = (PROMETHEUS / "kustomization.yaml").read_text()
+    assert "path: /spec/template/spec/containers/1/args/-" in kustomization
+    assert kustomization.count('value: "9741"') == 1 and "port: 9741" in kustomization
+    assert 'deal-hunter/metrics-access: "true"' in kustomization
+    assert "deal-hunter/dashboard-access" not in kustomization
+    assert "port: 8740" not in kustomization  # the dashboard port gets no new rule
+    assert "kind: ServiceMonitor" in (PROMETHEUS / "servicemonitor.yaml").read_text()
+
+
+@pytest.mark.skipif(shutil.which("promtool") is None, reason="promtool is not installed")
+def test_prometheus_rules_pass_their_unit_tests(tmp_path: Path) -> None:
+    (tmp_path / "rules.yaml").write_text(
+        rules_file((PROMETHEUS / "prometheusrule.yaml").read_text())
+    )
+    (tmp_path / "rules.test.yaml").write_text((PROMETHEUS / "rules.test.yaml").read_text())
+    promtool = shutil.which("promtool") or "promtool"
+    for args in (["check", "rules", "rules.yaml"], ["test", "rules", "rules.test.yaml"]):
+        done = subprocess.run(  # noqa: S603 — fixed argv
+            [promtool, *args], cwd=tmp_path, capture_output=True, text=True, check=False
+        )
+        assert done.returncode == 0, done.stdout + done.stderr
+
+
+@pytest.mark.skipif(shutil.which("kustomize") is None, reason="kustomize is not installed")
+def test_example_overlay_renders_the_prometheus_component() -> None:
+    kustomize = shutil.which("kustomize") or "kustomize"
+    done = subprocess.run(  # noqa: S603 — fixed argv
+        [kustomize, "build", str(ROOT / "deploy/kubernetes/example")],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    out = done.stdout
+    assert "kind: ServiceMonitor" in out and "kind: PrometheusRule" in out
+    assert "alert: DealHunterSearchStalled" in out
+    # The overlay's own args replace the component's, so it must carry the flag
+    # whenever the Service exposes the port, or the scrape would find nothing.
+    assert re.search(r"- --metrics-port\n\s+- \"9741\"", out)
+    assert "name: metrics\n    port: 9741" in out
+    assert out.count("deal-hunter/metrics-access") == 1
+
+
+def test_prometheus_patch_index_is_the_web_container() -> None:
+    lines = (ROOT / DEPLOYMENT).read_text().splitlines()
+    start = lines.index("      containers:")
+    names = []
+    for line in lines[start + 1 :]:
+        if re.match(r"^      \S", line):  # the next key of the pod spec
+            break
+        if m := re.match(r"^        - name: (\S+)$", line):
+            names.append(m.group(1))
+    assert names.index("web") == 1
+    assert "containers/1/" in (PROMETHEUS / "kustomization.yaml").read_text()

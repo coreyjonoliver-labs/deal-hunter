@@ -4,6 +4,33 @@ A running, dated log of completed work. Append a new entry (newest at the top)
 each time a spec reaches `Complete` or a meaningful milestone lands. This is the
 project's memory between sessions — `session-start` surfaces the latest entry.
 
+## 2026-10-16 — ops-metrics
+
+- `deal-hunter web --metrics-port` serves Prometheus `/metrics` on its own
+  listener (GET/HEAD `/metrics` only; Host must be an IP literal or one of the
+  dashboard's names, so a scrape by pod IP works and DNS rebinding doesn't):
+  build info, heartbeat, searches by outcome, listings, AI usage and estimated
+  spend, notifications, session presence/expiry, `cache_read_errors` (≥ 1 while
+  the last refresh failed). Counters come from the events file and reset when
+  it is trimmed (documented).
+- Labels are validated: configured watch names, a strict model pattern capped
+  at 20 distinct values, fixed method/outcome sets; events stamped > 300 s in
+  the future are ignored (metrics and the dashboard status).
+- `launch.py` patch 10 records `notification` events (method, outcome) for
+  push, email and Discord, never message text or URLs.
+- One `SnapshotCache` shared with the dashboard; `latest()` refreshes in the
+  background so a scrape answers within 2 s on a 20k-listing cache.
+- `deploy/kubernetes/components/prometheus/`: metrics port, NetworkPolicy rule
+  (`deal-hunter/metrics-access`), ServiceMonitor, PrometheusRule (stalled,
+  search failures, session expiring/expired, AI spend) with promtool unit
+  tests; the example overlay enables it.
+- Gate: code-reviewer + security-auditor, 2 rounds, 0 CRITICAL/HIGH; checks
+  enforced (828 passed, 1 skipped, ruff, format, mypy). Fixed in round 2: a
+  failed refresh served a stale snapshot silently; DNS rebinding on the
+  metrics port; spec drift; forged future timestamps; port range; a restart
+  mid-round counted toward the next. Not run here (sandbox): `docker build`,
+  `promtool test rules`, kubeconform — tracked (`promtool-in-ci`).
+
 ## 2026-10-15 — graduate-established
 
 - `main` is PR-only (merge commits, conversations resolved, admins bound),

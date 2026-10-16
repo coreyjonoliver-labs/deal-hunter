@@ -4,8 +4,8 @@ aimm's own log file has no timestamps and mixes in full API requests, so
 ``launch.main`` adds ``EventRecorder`` to the monitor's logging. It appends
 one JSON line per useful event to ``deal-hunter-events.jsonl`` in aimm's home:
 aimm's structured events (browser start, searches, AI ratings, skips),
-token usage from each AI response, per-phrase search result counts, and
-warnings and errors.
+token usage from each AI response, per-phrase search result counts,
+notification attempts (method and outcome only), and warnings and errors.
 
 Messages are redacted before they're written: aimm can log a notifier's
 token at WARNING ("Overriding ... with value ..."), so the values of secret-
@@ -43,8 +43,8 @@ _USAGE = {
     "cache_write_tokens": ("cache_creation_input_tokens",),
 }
 _MODEL = re.compile(r"\bmodel='([\w.:/-]+)'")
-_KINDS = {"search_summary", "browser_ready", "search_results"}
-_FIELDS = {"item", "new_count", "engine", "sandbox", "phrase_index", "count"}
+_KINDS = {"search_summary", "browser_ready", "search_results", "notification"}
+_FIELDS = {"item", "new_count", "engine", "sandbox", "phrase_index", "count", "method", "outcome"}
 # Env vars whose values never go in the file.
 _SECRET_ENV = re.compile(r"(KEY|TOKEN|PASSWORD|SECRET|TOPIC|CHAT_ID|USERNAME|CREDENTIALS?)$")
 # A webhook URL ends in its token, which is a secret on its own (a log line may

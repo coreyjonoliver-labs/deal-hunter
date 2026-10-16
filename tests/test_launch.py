@@ -17,7 +17,13 @@ from typing import Any
 
 import pytest
 from ai_marketplace_monitor import ai, facebook, marketplace, monitor, utils
-from ai_marketplace_monitor.notification import NotificationConfig, NotificationStatus
+from ai_marketplace_monitor.email_notify import EmailNotificationConfig
+from ai_marketplace_monitor.notification import (
+    NotificationConfig,
+    NotificationStatus,
+    PushNotificationConfig,
+)
+from ai_marketplace_monitor.ntfy import NtfyNotificationConfig
 from ai_marketplace_monitor.user import User, UserConfig
 from fakes import LOGIN_COOKIE, FakeBrowser, FakeContext
 
@@ -130,6 +136,8 @@ def test_main_patches_then_runs_aimm(
         (monitor.MarketplaceMonitor, "_launch_browser"),
         (monitor.MarketplaceMonitor, "__init__"),
         (NotificationConfig, "notify_all"),
+        (NotificationConfig, "send_message_with_retry"),
+        (EmailNotificationConfig, "send_email_message"),
     ]:
         monkeypatch.setattr(cls, name, getattr(cls, name))
     monkeypatch.setattr(launch, "SESSION", None)
@@ -161,6 +169,8 @@ def test_main_patches_then_runs_aimm(
     patched = NotificationConfig.__dict__["notify_all"]
     assert isinstance(patched, classmethod) and patched.__func__ is launch.notify_all_with_discord
     assert launch.DISCORD is not None and launch.DISCORD.timeout == 10
+    assert NotificationConfig.send_message_with_retry is launch.send_message_recorded
+    assert EmailNotificationConfig.send_email_message is launch.send_email_recorded
     assert launch.SESSION == sess and launch.SANDBOX is False
     assert os.umask(0o022) == 0o077  # files aimm writes are owner-only
     monitor_logger = logging.getLogger("monitor")
@@ -1483,3 +1493,169 @@ def test_a_webhook_that_rejects_every_card_leaves_listings_unnotified(
         user.notification_status(item, aimm_cache) is NotificationStatus.NOT_NOTIFIED
         for item in listings
     )
+
+
+# --- Notification outcomes ---------------------------------------------------------
+
+
+def test_notification_patch_points_still_exist() -> None:
+    # Every push notifier sends through send_message_with_retry (which catches the
+    # transport's errors and answers a bool); email has its own send_email_message.
+    # Both are called only once notify() has decided there is something to send.
+    send = inspect.getsource(NotificationConfig.send_message_with_retry)
+    assert (
+        "return self._execute_with_retry(title, message, logger, apply_rate_limiting=apply)" in send
+    )
+    assert list(inspect.signature(NotificationConfig.send_message_with_retry).parameters) == [
+        "self",
+        "title",
+        "message",
+        "logger",
+    ]
+    push = inspect.getsource(PushNotificationConfig.notify)
+    assert "if not self.send_message_with_retry(title, message, logger=logger):" in push
+    assert "send_message_with_retry" not in vars(NtfyNotificationConfig)
+    assert list(inspect.signature(EmailNotificationConfig.send_email_message).parameters)[:5] == [
+        "self",
+        "title",
+        "message",
+        "html",
+        "images",
+    ]
+    assert "return self.send_email_message(" in inspect.getsource(EmailNotificationConfig.notify)
+    for cls in (*PushNotificationConfig.__subclasses__(), EmailNotificationConfig):
+        assert cls.notify_method in launch.NOTIFY_METHODS  # the label set is complete
+
+
+@pytest.fixture
+def notified(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Any:
+    """(logger, read): the notification wrappers installed, events recorded to a temp file."""
+    monkeypatch.setattr(NotificationConfig, "send_message_with_retry", launch.send_message_recorded)
+    monkeypatch.setattr(EmailNotificationConfig, "send_email_message", launch.send_email_recorded)
+    path = tmp_path / events.EVENTS_NAME
+    logger = logging.getLogger("test-notify")
+    logger.setLevel(logging.DEBUG)
+    handler = events.EventRecorder(path, secrets=[], hidden=[])
+    logger.addHandler(handler)
+    try:
+        yield (
+            logger,
+            lambda: [
+                (e["method"], e["outcome"])
+                for e in events.read_events(path)
+                if e["kind"] == "notification"
+            ],
+        )
+    finally:
+        logger.removeHandler(handler)
+
+
+def ntfy(monkeypatch: pytest.MonkeyPatch, result: bool | Exception) -> NtfyNotificationConfig:
+    config = NtfyNotificationConfig(
+        name="me",
+        ntfy_server="https://ntfy.example",
+        ntfy_topic="a-topic",
+        max_retries=1,
+        retry_delay=0,
+    )
+
+    def send_message(title: str, message: str, logger: Any = None) -> bool:
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr(config, "send_message", send_message)
+    return config
+
+
+def notify_ntfy(config: NtfyNotificationConfig, logger: logging.Logger) -> bool:
+    status = [NotificationStatus.NOT_NOTIFIED]
+    return config.notify([_listing()], rated(1), status, force=False, logger=logger)
+
+
+def test_a_sent_push_message_is_recorded(monkeypatch: pytest.MonkeyPatch, notified: Any) -> None:
+    logger, read = notified
+    assert notify_ntfy(ntfy(monkeypatch, True), logger) is True
+    assert read() == [("ntfy", "sent")]
+
+
+@pytest.mark.parametrize("result", [False, ConnectionError("down")])
+def test_a_failed_push_message_is_recorded_once_per_batch(
+    monkeypatch: pytest.MonkeyPatch, notified: Any, result: bool | Exception
+) -> None:
+    # aimm retries inside send_message_with_retry: that is one attempt for us, and
+    # it doesn't raise, so the monitor carries on.
+    logger, read = notified
+    assert notify_ntfy(ntfy(monkeypatch, result), logger) is False
+    assert read() == [("ntfy", "failed")]
+
+
+def test_nothing_to_send_is_not_an_attempt(monkeypatch: pytest.MonkeyPatch, notified: Any) -> None:
+    logger, read = notified
+    config = ntfy(monkeypatch, True)
+    status = [NotificationStatus.NOTIFIED]
+    assert config.notify([_listing()], rated(1), status, force=False, logger=logger) is False
+    unconfigured = NtfyNotificationConfig(name="me")  # no topic
+    assert notify_ntfy(unconfigured, logger) is False
+    assert read() == []
+
+
+def test_email_outcomes_are_recorded(monkeypatch: pytest.MonkeyPatch, notified: Any) -> None:
+    logger, read = notified
+    config = EmailNotificationConfig(name="me")
+    monkeypatch.setattr(launch, "_upstream_send_email", lambda self, *a, **k: True)
+    assert config.send_email_message("t", "m", "<p>m</p>", [], logger=logger) is True
+    monkeypatch.setattr(launch, "_upstream_send_email", lambda self, *a, **k: False)
+    assert config.send_email_message("t", "m", "<p>m</p>", [], logger=logger) is False
+    assert read() == [("email", "sent"), ("email", "failed")]
+
+
+def test_a_notifier_that_raises_is_recorded_and_still_raises(
+    monkeypatch: pytest.MonkeyPatch, notified: Any
+) -> None:
+    logger, read = notified
+
+    def boom(self: Any, *a: Any, **k: Any) -> bool:
+        raise RuntimeError("smtp exploded")
+
+    monkeypatch.setattr(launch, "_upstream_send_email", boom)
+    with pytest.raises(RuntimeError, match="smtp exploded"):
+        EmailNotificationConfig(name="me").send_email_message("t", "m", "h", [], logger=logger)
+    assert read() == [("email", "failed")]
+
+
+def test_an_unknown_method_label_is_not_recorded_as_given(notified: Any) -> None:
+    logger, read = notified
+    launch.record_notification(logger, "evil\nmethod", True)
+    assert read() == [("other", "sent")]
+
+
+@pytest.mark.parametrize(("status", "outcome"), [(204, "sent"), (404, "failed")])
+def test_discord_outcomes_are_recorded(
+    discord_patched: tuple[Posts, list[Any]],
+    notified: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    status: int,
+    outcome: str,
+) -> None:
+    posts, _ = discord_patched
+    posts.status = status
+    logger, read = notified
+    monkeypatch.setattr(launch, "_upstream_notify_all", lambda cls, *a, **k: False)
+    monkeypatch.setattr(launch, "NOTIFY_LOGGER", logger)
+    NotificationConfig.notify_all(
+        UserConfig(name="me"), [_listing()], rated(1), [NotificationStatus.NOT_NOTIFIED]
+    )
+    assert read() == [("discord", outcome)]
+
+
+def test_discord_with_everything_already_notified_is_not_an_attempt(
+    discord_patched: tuple[Posts, list[Any]], notified: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    logger, read = notified
+    monkeypatch.setattr(launch, "_upstream_notify_all", lambda cls, *a, **k: False)
+    monkeypatch.setattr(launch, "NOTIFY_LOGGER", logger)
+    NotificationConfig.notify_all(
+        UserConfig(name="me"), [_listing()], rated(1), [NotificationStatus.NOTIFIED]
+    )
+    assert read() == []

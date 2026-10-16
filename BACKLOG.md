@@ -30,9 +30,22 @@ spec each.
   (test, image, secret-scan, dependency-review, codeql), branch protection,
   CODEOWNERS, sandbox `failIfUnavailable` (operator applies settings,
   workflow and protection)
+- [x] ops-metrics — `/metrics` on its own port (heartbeat, search failures,
+  session expiry, AI spend, notifications) + generic ServiceMonitor and alert
+  rules in `deploy/` (picked up 2026-10-16, operator: ops-metrics then
+  otel-tracing)
+- [ ] otel-tracing — OTLP traces per search cycle with an attribute allowlist,
+  off by default; builds on ops-metrics' notification/search events
 
 ## Up Next
 
+- [ ] promtool-in-ci — `tests/test_deploy.py::test_prometheus_rules_pass_their_unit_tests`
+  skips without promtool, so the alert-rule unit tests (`rules.test.yaml`) never
+  run in CI; install promtool in `build.yml` (workflow change: operator-only)
+- [ ] conventions-ops-metrics — add to the conventions skill: the `metrics`
+  module; `notification` events from `launch.py` patch 10; the metrics port's
+  IP-literal/allowed-host rule; `send_message_with_retry` and
+  `send_email_message` in the bump-aimm patch list (skill dir: operator-only)
 - [ ] bump-aimm — ai-marketplace-monitor 0.10.2 → latest. Upstream fixes the
   unconditional "Failed to get search results" and adds login recovery /
   search-radius handling, but changes every function deal-hunter
@@ -76,12 +89,6 @@ spec each.
   off-scale shapes `Rating 5 / 10` and `Rating 1-5`. Residual (accepted): a
   later line that itself starts with "Rating n:" still wins (aimm's loop is
   last-wins)
-- [ ] ops-metrics — `/metrics` on its own port (heartbeat, search failures,
-  session expiry, AI spend, notifications) + generic ServiceMonitor and alert
-  rules in `deploy/`; spec Ready, deferred: alerting is scoped to new listings
-  for now (a stalled monitor shows only on the dashboard's status card)
-- [ ] otel-tracing — OTLP traces per search cycle with an attribute allowlist,
-  off by default (depends on ops-metrics); spec Ready, deferred with it
 - [ ] config-hardening — unknown keys rejected in every settings table (not
   just `[[watch]]`), a `schema_version` with migrations (legacy `[search]` as
   the first), `deal-hunter config check`, a published JSON Schema; move

@@ -243,16 +243,39 @@ def test_login_refuses_anonymous(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 def test_web_warns_off_loopback(
     settings: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    calls: list[tuple[str, int, list[str]]] = []
+    calls: list[tuple[str, int, list[str], int | None, str | None]] = []
     monkeypatch.setattr(
         "deal_hunter.dashboard.serve",
-        lambda s, home, host, port, extra: calls.append((host, port, extra)),
+        lambda s, home, host, port, extra, mport, mhost: calls.append(
+            (host, port, extra, mport, mhost)
+        ),
     )
     assert main(["-s", str(settings), "web", "--host", "192.0.2.1", "--allow-host", "nuc.lan"]) == 0
-    assert calls == [("192.0.2.1", 8740, ["nuc.lan"])]
+    assert calls == [("192.0.2.1", 8740, ["nuc.lan"], None, None)]
     assert "no login" in capsys.readouterr().err
     assert main(["-s", str(settings), "web"]) == 0
     assert "no login" not in capsys.readouterr().err
+
+
+def test_web_metrics_flags(settings: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[int | None, str | None]] = []
+    monkeypatch.setattr(
+        "deal_hunter.dashboard.serve",
+        lambda s, home, host, port, extra, mport, mhost: calls.append((mport, mhost)),
+    )
+    assert main(["-s", str(settings), "web"]) == 0  # off by default
+    assert main(["-s", str(settings), "web", "--metrics-port", "9741"]) == 0
+    args = ["-s", str(settings), "web", "--metrics-port", "9741", "--metrics-host", "127.0.0.1"]
+    assert main(args) == 0
+    assert calls == [(None, None), (9741, None), (9741, "127.0.0.1")]
+
+
+def test_web_metrics_port_cannot_be_the_dashboards(
+    settings: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr("deal_hunter.dashboard.serve", pytest.fail)
+    assert main(["-s", str(settings), "web", "--port", "9741", "--metrics-port", "9741"]) == 2
+    assert "must differ" in capsys.readouterr().err
 
 
 def test_web_port_in_use(
@@ -611,3 +634,33 @@ def test_notify_test_reports_a_rejection_as_a_failure(
     captured = capsys.readouterr()
     assert "Sent a test card" not in captured.out
     assert "400" in captured.err and FAKE_TOKEN not in captured.err
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [["--port", "0"], ["--port", "65536"], ["--metrics-port", "0"], ["--metrics-port", "99999"],
+     ["--port", "-1"], ["--metrics-port", "x"]],
+)  # fmt: skip
+def test_web_rejects_bad_ports(
+    settings: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    flags: list[str],
+) -> None:
+    monkeypatch.setattr("deal_hunter.dashboard.serve", pytest.fail)
+    with pytest.raises(SystemExit) as exit_:
+        main(["-s", str(settings), "web", *flags])
+    assert exit_.value.code == 2
+    err = capsys.readouterr().err
+    assert "port" in err and "Traceback" not in err
+
+
+def test_web_warns_when_the_metrics_host_is_not_loopback(
+    settings: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr("deal_hunter.dashboard.serve", lambda *a: None)
+    assert main(["-s", str(settings), "web", "--metrics-port", "9741"]) == 0
+    assert "metrics" not in capsys.readouterr().err
+    args = ["-s", str(settings), "web", "--metrics-port", "9741", "--metrics-host", "192.0.2.1"]
+    assert main(args) == 0
+    assert "metrics on 192.0.2.1" in capsys.readouterr().err

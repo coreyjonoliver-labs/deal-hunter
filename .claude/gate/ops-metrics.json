@@ -1,0 +1,7 @@
+{
+  "spec": "ops-metrics",
+  "date": "2026-10-16",
+  "review": ["code-reviewer", "security-auditor"],
+  "checks": "enforce",
+  "verdict": "pass"
+}

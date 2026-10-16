@@ -1,0 +1,208 @@
+# Unit tests for the alert rules in prometheusrule.yaml.
+#   uv run pytest tests/test_deploy.py     (runs this when promtool is on PATH)
+# or by hand, after writing the PrometheusRule's spec (dedented two spaces) as
+# rules.yaml next to this file:
+#   promtool test rules rules.test.yaml
+#
+# A series' values are in steps of the test's `interval`; the heartbeat and
+# cookie-expiry values are Unix timestamps in seconds, so "3600" is one hour
+# after the (simulated) epoch the test starts at.
+rule_files:
+  - rules.yaml
+evaluation_interval: 1m
+
+tests:
+  # --- DealHunterSearchStalled ---------------------------------------------
+  - name: a recent heartbeat does not alert
+    interval: 1m
+    input_series:
+      - series: 'deal_hunter_last_success_timestamp_seconds{job="deal-hunter"}'
+        values: "14000x300"
+      - series: 'deal_hunter_search_interval_seconds{job="deal-hunter",bound="max"}'
+        values: "7200x300"
+    alert_rule_test:
+      - eval_time: 4h  # 400 s old; allowed 7200 + 1800
+        alertname: DealHunterSearchStalled
+        exp_alerts: []
+
+  - name: a stale heartbeat alerts once it is past the max interval plus 30 minutes
+    interval: 1m
+    input_series:
+      - series: 'deal_hunter_last_success_timestamp_seconds{job="deal-hunter"}'
+        values: "0x300"
+      - series: 'deal_hunter_search_interval_seconds{job="deal-hunter",bound="max"}'
+        values: "7200x300"
+    alert_rule_test:
+      - eval_time: 2h  # 7200 s old: still within 9000 s
+        alertname: DealHunterSearchStalled
+        exp_alerts: []
+      - eval_time: 4h
+        alertname: DealHunterSearchStalled
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: deal-hunter
+
+  - name: no heartbeat series at all alerts (absent guard)
+    interval: 1m
+    input_series:
+      - series: 'deal_hunter_search_interval_seconds{job="deal-hunter",bound="max"}'
+        values: "7200x300"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: DealHunterSearchStalled
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+
+  - name: nothing scraped at all also alerts
+    interval: 1m
+    input_series:
+      - series: 'up{job="other"}'
+        values: "1x300"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: DealHunterSearchStalled
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+
+  # --- DealHunterSessionExpiringSoon / DealHunterSessionExpired ------------
+  - name: a cookie expiring in 2 days is expiring soon, not expired
+    interval: 1m
+    input_series:
+      - series: 'deal_hunter_session_cookie_expiry_timestamp_seconds{job="deal-hunter"}'
+        values: "176400x300"  # 3600 s + 2 days
+      - series: 'deal_hunter_session_present{job="deal-hunter"}'
+        values: "1x300"
+    alert_rule_test:
+      - eval_time: 1h
+        alertname: DealHunterSessionExpiringSoon
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: deal-hunter
+      - eval_time: 1h
+        alertname: DealHunterSessionExpired
+        exp_alerts: []
+
+  - name: a cookie that expires in 10 days alerts nothing
+    interval: 1m
+    input_series:
+      - series: 'deal_hunter_session_cookie_expiry_timestamp_seconds{job="deal-hunter"}'
+        values: "867600x300"
+      - series: 'deal_hunter_session_present{job="deal-hunter"}'
+        values: "1x300"
+    alert_rule_test:
+      - eval_time: 1h
+        alertname: DealHunterSessionExpiringSoon
+        exp_alerts: []
+      - eval_time: 1h
+        alertname: DealHunterSessionExpired
+        exp_alerts: []
+
+  - name: an expired cookie is expired, not expiring soon
+    interval: 1m
+    input_series:
+      - series: 'deal_hunter_session_cookie_expiry_timestamp_seconds{job="deal-hunter"}'
+        values: "1000x300"
+      - series: 'deal_hunter_session_present{job="deal-hunter"}'
+        values: "1x300"
+    alert_rule_test:
+      - eval_time: 1h
+        alertname: DealHunterSessionExpired
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: deal-hunter
+      - eval_time: 1h
+        alertname: DealHunterSessionExpiringSoon
+        exp_alerts: []
+
+  - name: no saved session is expired
+    interval: 1m
+    input_series:
+      - series: 'deal_hunter_session_present{job="deal-hunter"}'
+        values: "0x300"
+    alert_rule_test:
+      - eval_time: 1h
+        alertname: DealHunterSessionExpired
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: deal-hunter
+
+  - name: an anonymous monitor exports no session series, so the session rules stay quiet
+    interval: 1m
+    input_series:
+      - series: 'deal_hunter_last_success_timestamp_seconds{job="deal-hunter"}'
+        values: "3000x300"
+    alert_rule_test:
+      - eval_time: 1h
+        alertname: DealHunterSessionExpired
+        exp_alerts: []
+      - eval_time: 1h
+        alertname: DealHunterSessionExpiringSoon
+        exp_alerts: []
+
+  # --- DealHunterSearchFailures ---------------------------------------------
+  - name: most phrase searches failing alerts
+    interval: 5m
+    input_series:
+      - series: 'deal_hunter_searches_total{job="deal-hunter",watch="w",outcome="failed"}'
+        values: "0+3x40"
+      - series: 'deal_hunter_searches_total{job="deal-hunter",watch="w",outcome="ok"}'
+        values: "0+1x40"
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: DealHunterSearchFailures
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: mostly succeeding searches do not alert
+    interval: 5m
+    input_series:
+      - series: 'deal_hunter_searches_total{job="deal-hunter",watch="w",outcome="failed"}'
+        values: "0+1x40"
+      - series: 'deal_hunter_searches_total{job="deal-hunter",watch="w",outcome="ok"}'
+        values: "0+3x40"
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: DealHunterSearchFailures
+        exp_alerts: []
+
+  - name: fewer than 4 searches in the hour do not alert, whatever their outcome
+    interval: 5m
+    input_series:
+      - series: 'deal_hunter_searches_total{job="deal-hunter",watch="w",outcome="failed"}'
+        values: "0x14 1 2 3 3x30"
+      - series: 'deal_hunter_searches_total{job="deal-hunter",watch="w",outcome="ok"}'
+        values: "0x40"
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: DealHunterSearchFailures
+        exp_alerts: []
+
+  # --- DealHunterAISpendHigh ---------------------------------------------------
+  - name: spending above the threshold in a day alerts
+    interval: 10m
+    input_series:
+      - series: 'deal_hunter_ai_cost_dollars_total{job="deal-hunter",model="m"}'
+        values: "0+0.02x300"  # about 2.88 dollars a day
+    alert_rule_test:
+      - eval_time: 30h
+        alertname: DealHunterAISpendHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+
+  - name: spending below the threshold does not alert
+    interval: 10m
+    input_series:
+      - series: 'deal_hunter_ai_cost_dollars_total{job="deal-hunter",model="m"}'
+        values: "0+0.001x300"
+    alert_rule_test:
+      - eval_time: 30h
+        alertname: DealHunterAISpendHigh
+        exp_alerts: []
