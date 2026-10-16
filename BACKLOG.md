@@ -55,6 +55,18 @@ spec each.
   false "couldn't export" and uses up the once-a-minute slot (give config
   warnings their own fixed line); refuse `%` in the endpoint host and port 0;
   redact `unquote`d header values and bare bearer tokens in the events file
+- [ ] search-budget-warning — every search phrase is one Marketplace page
+  load per interval across ALL watches, and Facebook throttles (and may flag)
+  busy logins, but nothing adds that cost up for the operator: a second watch
+  with a preset can double the page loads silently. Compute the budget at
+  startup and in `deal-hunter check` — Σ phrases × (1 / interval) = page
+  loads per hour — print it, warn above a documented soft threshold (a default
+  derived from what the live runs have tolerated, tunable in `[search]`),
+  refuse to start above a hard ceiling unless `[search] allow_busy = true`,
+  show it on the dashboard's settings panel, and export it as an ops-metrics
+  gauge so an alert rule can watch it. Also warn when a settings change will
+  trigger a re-rate pass (one AI call per cached listing of a changed watch)
+  and say how many listings that is.
 - [ ] bump-aimm — ai-marketplace-monitor 0.10.2 → latest. Upstream fixes the
   unconditional "Failed to get search results" and adds login recovery /
   search-radius handling, but changes every function deal-hunter
@@ -91,6 +103,40 @@ spec each.
 
 ## Later
 
+- [ ] watch-editor-ui — Research/decision first: let the dashboard add or
+  edit `[[watch]]` tables while the TOML file stays the source of truth.
+  Scrutiny so far, to be confirmed by the spec:
+  - The dashboard is deliberately read-only (`deal-hunter web` only reads
+    aimm's directory and the settings; it has no write path), it has no login
+    of its own (a reverse-proxy gate in front of it is the control in every
+    documented deployment), and it runs beside the browser that renders
+    untrusted seller pages. A write path from the UI into the settings turns
+    a dashboard compromise, or a cross-site request from an unrelated tab,
+    into control of what the browser searches for and what the AI is told.
+    Any editor with an "apply" therefore needs same-origin + CSRF tokens, a
+    separate port or process from the read-only dashboard, and must never
+    write the file the `run` process reads unless the deployment mounts it
+    writable.
+  - In container deployments the settings file is usually a read-only mount
+    owned by the orchestrator (compose, a ConfigMap managed from git): the
+    "apply" half has nowhere to write, and a writable overlay on the data
+    volume would split the source of truth and silently survive a change the
+    operator makes in the real file.
+  - What works everywhere: a **watch composer** — a form that validates a
+    watch (the `name` rule, prices, phrases or preset, keywords), shows the
+    search-budget impact (page loads per hour before/after, see
+    search-budget-warning) and the re-rate cost, previews what the first
+    search would return (`deal-hunter check`-style), and emits the exact
+    `[[watch]]` TOML to paste into the settings file. No write path, no new
+    attack surface, works with git-managed and compose deployments alike.
+  - Optional second step, only where the file is writable: an "apply" button
+    gated by `[web] allow_settings_write = true` AND a writable settings path,
+    writing an atomic replacement with a `.bak`, then signalling `run` to
+    re-render (today: a restart). Off by default; documented as widening the
+    dashboard from read-only to a config-writing surface, with its own threat
+    model.
+  Recommendation: build the composer (cheap, safe); treat "apply" as a
+  separate spec.
 - [ ] rating-parse-followups — the one-per-run "rating line didn't match"
   warning can fire on a reasoning line that quotes a listing's mid-line
   "Rating 5" (then reads "scored as unrated" wrongly and uses up its one
