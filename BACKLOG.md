@@ -36,6 +36,9 @@ spec each.
   otel-tracing)
 - [x] otel-tracing — OTLP traces per search cycle with an attribute allowlist,
   off by default; builds on ops-metrics' notification/search events
+- [ ] release-0-4-0 — publish 0.4.0 (Prometheus metrics, OpenTelemetry
+  tracing): version bump → main publishes + attests → strict verify + image
+  smoke check → pin the digest in `deploy/` in a follow-up
 
 ## Up Next
 
