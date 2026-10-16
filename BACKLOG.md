@@ -26,6 +26,10 @@ spec each.
 - [x] release-0-3-0 — publish 0.3.0 (Discord alerts, search signal, rating
   summaries): version bump → main publishes + attests → strict verify → pin
   the digest in `deploy/` in a follow-up
+- [ ] graduate-established — server-side merge boundary: required checks
+  (test, image, secret-scan, dependency-review, codeql), branch protection,
+  CODEOWNERS, sandbox `failIfUnavailable` (operator applies settings,
+  workflow and protection)
 
 ## Up Next
 
@@ -39,13 +43,13 @@ spec each.
   **Deferred (operator, 2026-10-15): not before** the newest aimm release is
   at least 5 days old with no newer release in that window (per PyPI,
   0.10.3–0.10.16 shipped Oct 5–14; re-check around Oct 22).
-- [ ] graduate-established — `/graduate` hardening for the established profile:
-  branch protection requiring CI on `main`, CODEOWNERS, sandbox
-  `failIfUnavailable` (operator applies settings/protection)
 - [ ] immutable-release-tags — CI republishes the version tag on every `main`
   build; publish per-commit tags or refuse an existing version; gate the
   `image`/`attest` jobs on `refs/heads/main` (`workflow_dispatch` on a branch
-  can publish and attest today) (workflow change: operator-only). Until then
+  can publish and attest today; so can any pushed branch that edits
+  `build.yml`'s trigger, so the fix must live outside the workflow — an
+  environment-scoped publish credential limited to `main`, or registry-side
+  immutable tags) (workflow change: operator-only). Until then
   the README's `docker run` examples pull by tag only (`:0.3.0`), so a paste
   gets the latest `main` build; show `:<version>@sha256:<digest>` with a
   pointer to the verify step in `deploy/README.md`
@@ -53,6 +57,12 @@ spec each.
   `gh attestation verify` on the digest pinned in `deploy/`, so a pinning PR
   can't merge an unattested or branch-built digest (workflow change:
   operator-only)
+- [ ] scoped-agent-token — agent sessions run `gh` unsandboxed with the
+  operator's admin token, which can change branch protection, dispatch
+  workflows and merge; `permissions.ask` prompts are only a speed bump. Give
+  agent sessions a fine-grained `GH_TOKEN` (this repo; contents + pull
+  requests write; no Administration, Actions or Workflows write) so those are
+  out of reach whatever the command (operator: token + env setup)
 - [ ] chromium-sandbox-seccomp — Research: a `Localhost` seccomp profile that
   lets Chromium's sandbox start under runc, so `browser_sandbox = true` works in
   containers without a microVM

@@ -1,0 +1,28 @@
+# Owners of the paths that need a maintainer's review (spec graduate-established).
+#
+# Every rule is a literal path from the repo root; tests/test_codeowners.py fails
+# if one stops existing, because GitHub silently ignores a rule that matches
+# nothing. While there's one maintainer, branch protection requires no approval
+# (you can't approve your own PR), so these are informational; with a second
+# maintainer, turn on "Require review from Code Owners".
+
+# The controls: CI, ownership itself, the agent's settings, gate stamps and
+# lessons, the conventions skill.
+/.github/                       @coreyjonoliver
+/.claude/                       @coreyjonoliver
+
+# What self-hosters run: manifests, image pins, the image build.
+/deploy/                        @coreyjonoliver
+/Dockerfile                     @coreyjonoliver
+
+# Dependencies, including the exact ai-marketplace-monitor pin.
+/pyproject.toml                 @coreyjonoliver
+/uv.lock                        @coreyjonoliver
+
+# Patches to aimm (browser hardening, the rating parser).
+/src/deal_hunter/launch.py      @coreyjonoliver
+
+# Where seller- and AI-written text is rendered.
+/src/deal_hunter/discord.py     @coreyjonoliver
+/src/deal_hunter/dashboard.py   @coreyjonoliver
+/src/deal_hunter/dashboard.html @coreyjonoliver

@@ -1,0 +1,7 @@
+{
+  "spec": "graduate-established",
+  "date": "2026-10-15",
+  "review": ["code-reviewer", "security-auditor"],
+  "checks": "enforce",
+  "verdict": "pass"
+}
