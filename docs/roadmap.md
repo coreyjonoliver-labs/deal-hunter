@@ -48,7 +48,7 @@ on 2026-10-16 (operator decision: ops-metrics first, then otel-tracing).
 |---|---|---|
 | [discord-deal-alerts](specs/discord-deal-alerts.md) | None | Complete |
 | [ops-metrics](specs/ops-metrics.md) | None | Complete |
-| [otel-tracing](specs/otel-tracing.md) | ops-metrics | Ready |
+| [otel-tracing](specs/otel-tracing.md) | ops-metrics | Complete |
 
 <!--
 Add phases as the project grows. A phase is just a grouping for sequencing; the

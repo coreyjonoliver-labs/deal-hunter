@@ -1,6 +1,6 @@
 # Spec: OpenTelemetry tracing
 
-**Status:** Ready
+**Status:** Complete
 **Kind:** Implementation
 **Author:** Corey Oliver
 **Date:** 2026-10-15
@@ -61,12 +61,20 @@ the pull `/metrics` endpoint from `ops-metrics`; OTel is used for traces only.
    and `service.version` set to the package version, using a batch span
    processor.
 3. Spans:
-   - `deal_hunter.cycle` (root): one search round of all watches.
-   - `deal_hunter.search` per watch and phrase, child of the cycle.
-   - `deal_hunter.navigate` per page load, with retry count and outcome.
-   - `deal_hunter.listing` per listing-detail fetch.
+   aimm schedules each watch as its own job, so a cycle is one watch's round.
+   `search`, `navigate`, `listing`, `ai_rate` and `notify` are all direct
+   children of the cycle (spans are never held open across aimm's `search`
+   generator).
+   - `deal_hunter.cycle` (root): one `search_item` call, i.e. one watch's
+     round.
+   - `deal_hunter.search` per phrase search: it wraps the parse of the results
+     page only (`get_listings`), with the result count.
+   - `deal_hunter.navigate` per page load, with retry count and outcome; during
+     a search it carries the watch and phrase index it belongs to.
+   - `deal_hunter.listing` per listing-detail fetch (outcome `ok` or `cached`).
    - `deal_hunter.ai_rate` per AI call, with provider, model, token counts,
-     outcome and the rating (1–5) — not the prompt or response text.
+     AI retries, outcome (`ok` or `failed`; a cached rating is `ok` without
+     token counts) and the rating (1–5) — not the prompt or response text.
    - `deal_hunter.notify` per notification method attempt, with method and
      outcome.
    - `deal_hunter.session_save` when the session is saved.
@@ -89,13 +97,37 @@ the pull `/metrics` endpoint from `ops-metrics`; OTel is used for traces only.
 7. Before `run` restarts itself (`os.execv`) or exits, pending spans shall be
    flushed with a bounded timeout (≤ 5 s); an unreachable collector shall never
    block or crash the monitor (export errors are logged once per minute at
-   most, without the endpoint's credentials if any).
+   most, without the endpoint's credentials if any). There is no flush at the
+   end of each cycle: the batch processor exports in the background, so a cycle
+   end never waits on the collector. The SDK's own flush ignores its timeout
+   while an export is in flight, so the bound is enforced by deal-hunter.
 8. The OTel packages shall be an optional extra `tracing`
    (`[project.optional-dependencies]`: `opentelemetry-api`,
    `opentelemetry-sdk`, `opentelemetry-exporter-otlp-proto-http`), locked in
    `uv.lock` and installed in the container image; on a desktop install without them, setting the
-   endpoint shall print one warning and run untraced.
-9. Docs: `README.md` (how to turn it on, what's recorded and what never is) and
+   endpoint shall print one warning and run untraced. The same three pins are
+   also in the `dev` dependency group so CI's plain `uv sync --locked` runs the
+   tracing tests.
+9. Configuration checks, all failing with exit code 2 and a fixed message that
+   does not repeat the value: an endpoint that is not an http(s) URL; an
+   `OTEL_EXPORTER_OTLP_HEADERS` / `..._TRACES_HEADERS` that is not
+   comma-separated `key=value` pairs (checked before the SDK is built, because
+   the SDK logs a malformed pair, value included); and a token (headers, or
+   credentials in the URL) over plain `http://` to anything but loopback or an
+   in-cluster `.svc` / `.svc.cluster.local` host (a query string in the endpoint
+   counts as a token; an endpoint with a backslash, whitespace or control
+   character, or whose host `urlparse` and urllib3 read differently, is
+   refused). The SDK's
+   `OTEL_PYTHON_EXPORTER_OTLP_HTTP_TRACES_CREDENTIAL_PROVIDER` hook is outside
+   that check (documented). The logging hook that keeps
+   the SDK's messages off the monitor's logs is installed before any SDK object
+   exists and stays for the life of the process (export threads can still log
+   after shutdown). `OTEL_TRACES_EXPORTER=none` turns tracing off;
+   `OTEL_EXPORTER_OTLP_PROTOCOL` is ignored (always HTTP/protobuf). Values of
+   `*_ENDPOINT` userinfo/query and `*HEADERS` env vars are redacted from the
+   events file (including a username-only token in an endpoint URL). Resource attributes are operator-set and outside the allowlist
+   (documented).
+10. Docs: `README.md` (how to turn it on, what's recorded and what never is) and
    `deploy/README.md` (the env vars for Compose and Kubernetes, the collector
    host to add to the egress allowlist, an optional kustomize component that
    sets them).
@@ -109,7 +141,7 @@ Then no OpenTelemetry tracer provider is created and the run is unchanged
 
 Given OTEL_EXPORTER_OTLP_ENDPOINT points at an in-memory/fake OTLP collector
 When one search cycle runs (aimm faked as in the launch tests)
-Then the collector receives a deal_hunter.cycle trace with search, navigate, ai_rate and notify children carrying the allowlisted attributes
+Then the collector receives one deal_hunter.cycle trace whose direct children are the search, navigate, listing, ai_rate and notify spans, carrying the allowlisted attributes
 
 Given a span on which code sets "listing.title", "url.full" and an exception message containing the location
 When it is exported
@@ -121,7 +153,7 @@ Then it carries no traceparent or baggage header
 
 Given the collector is unreachable
 When a cycle ends and when run restarts via exec
-Then the monitor continues, the flush gives up within 5 s, and at most one export error per minute is logged
+Then the monitor continues (a cycle end never waits on the collector), the flush before exec or exit gives up within 5 s, and at most one export error per minute is logged
 
 Given OTEL_SDK_DISABLED=true and an endpoint set
 When run starts
@@ -138,7 +170,7 @@ Then tracing stays off
 | `pyproject.toml`, `uv.lock` | edit | optional `tracing` extra |
 | `Dockerfile` | edit | install the `tracing` extra |
 | `tests/test_tracing.py` | create | in-memory exporter, allowlist, propagation, off-by-default, flush |
-| `deploy/kubernetes/components/tracing/` | create | optional component setting the `OTEL_*` env on `monitor` |
+| `deploy/kubernetes/components/tracing/` | create | optional component setting the `OTEL_*` env on `monitor` and an egress rule to the collector's pods (namespace and pod selector) |
 | `README.md`, `deploy/README.md` | edit | enabling, what's recorded, egress |
 
 ## Data / State Impact
@@ -200,6 +232,8 @@ uv run pytest -q tests/test_tracing.py
 
 ## Open Questions
 
-- Should listing ids (numeric Marketplace ids) be allowed as an attribute to
-  correlate a slow `deal_hunter.listing` span with the dashboard? They're not
-  personal, but they identify a seller's listing; this spec leaves them out.
+None. Resolved: listing ids (numeric Marketplace ids) are **not** an
+attribute. They identify a seller's listing and the allowlist cannot tell them
+from other free text; a slow `deal_hunter.listing` span is located by its time
+and parent cycle. Adding one later would be a spec change with its own
+validator.

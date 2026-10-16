@@ -317,6 +317,75 @@ the previous snapshot if a large cache takes longer to read. Until the first
 snapshot exists it answers with `deal_hunter_build_info`,
 `deal_hunter_search_interval_seconds` and `deal_hunter_cache_read_errors 1`.
 
+### Traces with OpenTelemetry
+
+Metrics say *that* searches fail; a trace says *where* a search round spent its
+time or failed: a slow Facebook page, a retried load, a slow AI call, a failed
+notification. `deal-hunter run` can export traces over OTLP/HTTP to any
+collector (the OpenTelemetry Collector, Grafana Alloy, a vendor's agent). It is
+**off unless you set an endpoint**.
+
+```sh
+uv sync --locked --extra tracing          # the container image already has it
+OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318 uv run deal-hunter run
+```
+
+`run` prints `Tracing: sending spans to <host>` when it is on (the host only:
+an endpoint can carry credentials). Without the `tracing` extra installed, an
+endpoint makes `run` print one warning and carry on untraced. Tracing stays off
+with no endpoint, with `OTEL_SDK_DISABLED=true` (whatever else is set), or with
+`OTEL_TRACES_EXPORTER=none`; then no OpenTelemetry object is created. An
+endpoint that isn't an `http://` or `https://` URL, an `OTEL_EXPORTER_OTLP_HEADERS` (or
+`..._TRACES_HEADERS`) that isn't `key=value` pairs, or a token (headers, or a user and
+password in the URL) that would go over plain `http://` to anything but localhost or an
+in-cluster `.svc` address (a query string in the endpoint counts as a token), or an endpoint with a
+backslash, whitespace or control character in it, stops `run` with exit code 2 and a message that doesn't repeat the value.
+
+The usual OpenTelemetry variables apply: `OTEL_EXPORTER_OTLP_ENDPOINT` or
+`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS` (for a token),
+`OTEL_EXPORTER_OTLP_TIMEOUT`, the certificate variables, `OTEL_SERVICE_NAME`
+(default `deal-hunter`), `OTEL_RESOURCE_ATTRIBUTES` and `OTEL_TRACES_SAMPLER`
+(default: every trace; a round per hour is little volume). The protocol is
+always OTLP/HTTP with protobuf. Put tokens in the environment, not in the
+settings file. Only `run` is traced, not `web`.
+
+aimm schedules each watch as its own job, so one trace is one watch's round:
+
+| Span | One per | Attributes |
+|---|---|---|
+| `deal_hunter.cycle` | watch round (the root) | `deal_hunter.watch`, `deal_hunter.count.new` (new listings sent on), `deal_hunter.outcome` |
+| `deal_hunter.search` | phrase search (the results page parsed) | `deal_hunter.watch`, `deal_hunter.phrase_index`, `deal_hunter.count.listings`, `deal_hunter.outcome` (`ok`, `empty`) |
+| `deal_hunter.navigate` | page load, retries included | `deal_hunter.attempt` (retries used), `http.response.status_code`, `deal_hunter.outcome` |
+| `deal_hunter.listing` | listing-detail fetch | `deal_hunter.outcome` (`ok`, `cached`) |
+| `deal_hunter.ai_rate` | AI call | `gen_ai.system`, `gen_ai.request.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `deal_hunter.rating` (1-5), `deal_hunter.attempt` (AI retries), `deal_hunter.outcome` |
+| `deal_hunter.notify` | notification attempt | `notify.method`, `deal_hunter.outcome` (`sent`, `failed`) |
+| `deal_hunter.session_save` | Facebook session save | `deal_hunter.outcome` |
+
+A failure sets the span's status to error with `exception.type` (the exception's
+class name) and a fixed description such as `deal_hunter.navigate failed`.
+
+**What is never exported:** search phrases, the Marketplace location, a
+listing's title, description, id, URL, seller or town, image URLs, cookies and
+headers, prompts and AI replies, API keys, webhook URLs, and exception messages
+or stack traces (which can hold any of those). This is enforced in code, not by
+care: every span passes through a processor that keeps only the attributes in
+the table (and only values of the right shape: a validated watch name, small
+integers, a fixed set of outcomes), and drops events, links and everything else
+before export. The one free-text-looking value is the model name, which comes from your
+settings. The resource attributes (`OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES`, and
+any resource detector) are set by you, are attached to every span, and are outside the
+allowlist: don't put anything in them you wouldn't give the collector. The SDK's `OTEL_PYTHON_EXPORTER_OTLP_HTTP_TRACES_CREDENTIAL_PROVIDER` hook, if you set it,
+supplies credentials the https check can't see. No `traceparent` or `baggage` header is added to requests to
+Facebook, your AI provider or a notifier (the propagator is a no-op and nothing
+instruments HTTP clients). Use an `https://` endpoint when it leaves your network:
+the spans hold no listing text, but they do show when you search and what you watch.
+
+If the collector is down the monitor carries on: spans are exported in the
+background, an export error is printed (the exception type only, never the
+endpoint) at most once a minute, and the final flush before a restart or exit
+gives up after 5 seconds. Spans of a round in progress when the process stops
+may be lost.
+
 ### Run in a container
 
 The `Dockerfile` builds one image for both `run` and `web` (CI publishes it to
@@ -447,7 +516,8 @@ read what's generated.
   text as untrusted, but don't act on payment or contact details that show up
   in an alert.
 - Install with `uv sync --locked` to get the hash-pinned dependency set from
-  `uv.lock`.
+  `uv.lock`. Add `--extra tracing` for [OpenTelemetry traces](#traces-with-opentelemetry);
+  the development install already includes it.
 - ai-marketplace-monitor **also** reads `~/.ai-marketplace-monitor/config.toml`
   if it exists, and merges it in. Keep that file empty or remove it, or its
   items will run too. With `facebook.require_session` (unattended), `run`

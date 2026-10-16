@@ -71,6 +71,7 @@ _HOST_RE = re.compile(r"^[A-Za-z0-9.-]+$")
 # <name>", and it's part of every cached rating's key, so renaming a watch
 # rates its listings again.
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _-]{0,39}$")
+WATCH_NAME_RE = _NAME_RE  # tracing.py validates a watch name before it leaves in a span
 MAX_WATCHES = 20
 MAX_PHRASES = 10
 

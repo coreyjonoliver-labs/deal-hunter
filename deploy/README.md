@@ -14,6 +14,9 @@ This directory has starting points for running it unattended:
 - `kubernetes/components/prometheus/`: Prometheus metrics for any Prometheus
   Operator setup: a metrics port, a ServiceMonitor, alert rules (with
   `promtool` tests). See [Metrics and alerts](#metrics-and-alerts).
+- `kubernetes/components/tracing/`: OpenTelemetry traces from the monitor to an
+  OTLP/HTTP collector in your cluster (an env var and an egress rule). Opt-in
+  and not in the example. See [Traces](#traces).
 - `kubernetes/example/`: an overlay that puts them together. Copy it, fill in
   the settings, the image digest and the dashboard's host name, create the
   two Secrets named in `base/deployment.yaml`, then
@@ -123,7 +126,8 @@ The monitor needs `www.facebook.com`, `facebook.com`, `*.facebook.com`,
 (`api.anthropic.com`, `api.openai.com`) and notifier (`ntfy.sh`,
 `api.pushover.net`, `api.telegram.org`, `api.pushbullet.com`, `discord.com`
 for `notify.methods = ["discord"]` (webhook in `DISCORD_WEBHOOK_URL`), or your
-SMTP server). The dashboard makes no outbound calls.
+SMTP server), and, if you turn on [traces](#traces), your OTLP collector. The
+dashboard makes no outbound calls.
 
 `discord.com` is optional and widens the allowlist more than the others: the
 policy covers the whole pod, so a compromised browser that can reach
@@ -138,6 +142,48 @@ The base NetworkPolicy can only say "HTTPS to public addresses", so the
 browser can still reach any public site. Add the `cilium-egress` component
 on Cilium, or your CNI's or firewall's equivalent (Calico's DNS policies, an
 egress proxy), to narrow it to the hosts above.
+
+## Traces
+
+`deal-hunter run` exports OpenTelemetry traces (one per watch round: phrase
+searches, page loads, listing fetches, AI calls, notifications) when
+`OTEL_EXPORTER_OTLP_ENDPOINT` (or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`) is set,
+over OTLP/HTTP with protobuf. It is off otherwise, and `OTEL_SDK_DISABLED=true`
+turns it off whatever else is set. The image has the OpenTelemetry packages
+installed (the `tracing` extra). The main README ("Traces with OpenTelemetry")
+lists the spans and what they carry: names, timings and counts, never a
+phrase, location, listing text, URL, AI text, secret or exception message.
+Only the `monitor` container is traced.
+
+- **Compose:** put `OTEL_EXPORTER_OTLP_ENDPOINT=https://<collector>:4318` in the
+  `.env` file the `monitor` service already reads (and
+  `OTEL_EXPORTER_OTLP_HEADERS=authorization=Bearer ...` there, if the collector
+  needs a token). `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES` and
+  `OTEL_TRACES_SAMPLER` work as in any OpenTelemetry service.
+- **Kubernetes:** add `../components/tracing` to your overlay's `components:`
+  (after `cilium-egress`: that component replaces the base policy's egress
+  rules, so a rule added before it is lost). It sets
+  `OTEL_EXPORTER_OTLP_ENDPOINT` on the `monitor` container to a placeholder
+  (`http://otel-collector.observability.svc.cluster.local:4318`; change it, by
+  editing the component or patching your overlay) and adds one NetworkPolicy
+  egress rule to port 4318 for pods labelled
+  `app.kubernetes.io/name: opentelemetry-collector` in the `observability` namespace
+  (change both selectors to match your collector).
+  With a token, use an `https://` endpoint or an in-cluster `.svc` address: `run`
+  exits with code 2 for a token over plain http to any other host. A token for
+  the collector goes in `OTEL_EXPORTER_OTLP_HEADERS` in the
+  credentials Secret the monitor already reads, never in a manifest. The collector
+  itself, and whatever stores traces, are yours to run.
+- **Egress allowlist:** the collector's host is a new destination for the pod.
+  With the `cilium-egress` component, add it to **both** lists in `cnp.yaml`
+  (the DNS rule and `toFQDNs`) with port 4318 (or 443 behind a TLS endpoint);
+  for an in-cluster collector, allow it by endpoint selector instead. For a
+  collector outside the cluster, prefer an `https://` endpoint, and remember
+  that a compromised browser shares the pod's network policy, so every host on
+  the list is a host it can reach.
+- If the collector is unreachable the monitor is unaffected: export errors are
+  printed at most once a minute and the flush before a restart gives up after
+  5 seconds.
 
 ## Metrics and alerts
 

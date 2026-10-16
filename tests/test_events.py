@@ -368,6 +368,50 @@ def test_other_env_names_are_unaffected_by_the_webhook_rule(
     assert "other-plain-value" not in events.secret_values()
 
 
+def test_otlp_headers_are_secret_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A collector token travels in OTEL_EXPORTER_OTLP_HEADERS ("authorization=Bearer ...").
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_HEADERS", "authorization=Bearer tok-xxxxxxxxxx")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_TRACES_HEADERS", "x-api-key=k-yyyyyyyyyy")
+    values = events.secret_values()
+    assert "authorization=Bearer tok-xxxxxxxxxx" in values and "x-api-key=k-yyyyyyyyyy" in values
+
+
+def test_endpoint_credentials_and_query_are_secret_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "https://user:pw-12345678@otel.example:4318/v1?token=abc12345&x=1",
+    )
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://u2:pw2-87654321@h.example/p")
+    monkeypatch.setenv(
+        "OTEL_EXPORTER_OTLP_HEADERS", "authorization=Bearer tok-xxxxxxxxxx, x-key=k-zzzzzzzzzz"
+    )
+    values = events.secret_values()
+    for expected in (
+        "pw-12345678",
+        "user:pw-12345678",
+        "abc12345",
+        "token=abc12345&x=1",
+        "pw2-87654321",
+        "Bearer tok-xxxxxxxxxx",
+        "k-zzzzzzzzzz",
+    ):
+        assert expected in values, expected
+    assert "otel.example" not in values and "4318" not in values  # the host is not a secret
+
+
+def test_a_username_only_token_in_an_endpoint_is_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "https://TOKEN-0123456789@otel.example:4318")
+    monkeypatch.setenv("OTHER_ENDPOINT", "https://me@otel.example")  # too short to be a token
+    values = events.secret_values()
+    assert "TOKEN-0123456789" in values and "me" not in values
+
+
+def test_a_plain_endpoint_adds_no_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SOME_ENDPOINT", "https://api.example/v1")
+    assert "https://api.example/v1" not in events.secret_values()
+    assert "api.example" not in events.secret_values()
+
+
 def test_notification_event(recorder: events.EventRecorder) -> None:
     extra = aimm_event("notification", method="ntfy", outcome="failed", title="secret listing")
     event = recorder.to_event(record("[Notify] attempt", **extra))

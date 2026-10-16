@@ -664,3 +664,148 @@ def test_web_warns_when_the_metrics_host_is_not_loopback(
     args = ["-s", str(settings), "web", "--metrics-port", "9741", "--metrics-host", "192.0.2.1"]
     assert main(args) == 0
     assert "metrics on 192.0.2.1" in capsys.readouterr().err
+
+
+# --- tracing -------------------------------------------------------------------
+
+
+def anonymous_settings(tmp_path: Path) -> Path:
+    s = tmp_path / "s.toml"
+    s.write_text(SETTINGS + "[facebook]\nanonymous = true\n")
+    return s
+
+
+def test_run_without_otel_variables_creates_no_tracer_provider(
+    tmp_path: Path, aimm_calls: list[tuple[list[str], object]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    from deal_hunter import tracing
+
+    assert (
+        main(["-s", str(anonymous_settings(tmp_path)), "run", "-o", str(tmp_path / "c.toml")]) == 0
+    )
+    assert len(aimm_calls) == 1
+    assert tracing._provider is None and not tracing.enabled()
+    assert "Tracing" not in capsys.readouterr().out
+
+
+def test_run_with_the_sdk_disabled_stays_untraced(
+    tmp_path: Path,
+    aimm_calls: list[tuple[list[str], object]],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from deal_hunter import tracing
+
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4318")
+    monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+    assert (
+        main(["-s", str(anonymous_settings(tmp_path)), "run", "-o", str(tmp_path / "c.toml")]) == 0
+    )
+    assert len(aimm_calls) == 1 and tracing._provider is None
+    assert "Tracing" not in capsys.readouterr().out
+
+
+def test_run_turns_tracing_on_before_the_monitor_starts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from deal_hunter import tracing
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    monkeypatch.setenv("NTFY_TOPIC", "t")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "https://user:s3cret@otel.example:4318/x")
+    order: list[str] = []
+    real_setup = tracing.setup
+
+    def setup(*a: object, **k: object) -> bool:
+        order.append("setup")
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+        return real_setup(exporter=InMemorySpanExporter())
+
+    monkeypatch.setattr(tracing, "setup", setup)
+    monkeypatch.setattr(
+        "deal_hunter.launch.main",
+        lambda argv, session, sandbox, discord_url=None: order.append(
+            f"monitor tracing={tracing.enabled()}"
+        ),
+    )
+    assert (
+        main(["-s", str(anonymous_settings(tmp_path)), "run", "-o", str(tmp_path / "c.toml")]) == 0
+    )
+    assert order == ["setup", "monitor tracing=True"]
+    out = capsys.readouterr().out
+    assert "Tracing: sending spans to otel.example:4318 (OTLP/HTTP)" in out
+    assert "s3cret" not in out and "user" not in out.split("Tracing")[1]
+    assert not tracing.enabled()  # main() stopped it on the way out
+
+
+def test_a_malformed_endpoint_stops_run_with_exit_2_before_the_monitor(
+    tmp_path: Path,
+    aimm_calls: list[tuple[list[str], object]],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "collector.example:4318")
+    assert (
+        main(["-s", str(anonymous_settings(tmp_path)), "run", "-o", str(tmp_path / "c.toml")]) == 2
+    )
+    err = capsys.readouterr().err
+    assert "OTEL_EXPORTER_OTLP_ENDPOINT must be an http" in err and "collector.example" not in err
+    assert aimm_calls == []
+
+
+def test_restart_flushes_pending_spans_before_exec(monkeypatch: pytest.MonkeyPatch) -> None:
+    from deal_hunter import cli
+
+    order: list[str] = []
+    monkeypatch.setattr("deal_hunter.tracing.flush", lambda *a, **k: order.append("flush") or True)
+    monkeypatch.setattr("deal_hunter.cli.os.execv", lambda exe, argv: order.append("exec"))
+    cli._restart()
+    assert order == ["flush", "exec"]
+
+
+def test_run_stops_tracing_on_every_way_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    monkeypatch.setenv("NTFY_TOPIC", "t")
+    stops: list[str] = []
+    monkeypatch.setattr("deal_hunter.tracing.shutdown", lambda *a, **k: stops.append("stop"))
+
+    def exits(*a: object, **k: object) -> None:
+        raise SystemExit(0)  # how aimm's CLI ends
+
+    monkeypatch.setattr("deal_hunter.launch.main", exits)
+    argv = ["-s", str(anonymous_settings(tmp_path)), "run", "-o", str(tmp_path / "c.toml")]
+    with pytest.raises(SystemExit):
+        main(argv)
+    monkeypatch.setattr(
+        "deal_hunter.launch.main", lambda *a, **k: (_ for _ in ()).throw(KeyError())
+    )
+    with pytest.raises(KeyError):
+        main(argv)
+    assert stops == ["stop", "stop"]
+
+
+def test_exec_restart_with_an_unreachable_collector_is_bounded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import socket
+    import time
+
+    from deal_hunter import cli, tracing
+
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", f"http://127.0.0.1:{port}")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_TIMEOUT", "1")
+    execs: list[list[str]] = []
+    monkeypatch.setattr("deal_hunter.cli.os.execv", lambda exe, argv: execs.append(argv))
+    assert tracing.setup()
+    with tracing.span(tracing.CYCLE):
+        pass
+    started = time.monotonic()
+    cli._restart()
+    assert len(execs) == 1  # the monitor carries on to its restart
+    assert time.monotonic() - started < tracing.FLUSH_TIMEOUT_S + 1

@@ -28,7 +28,9 @@ WORKDIR /src
 # Dependencies first (cached until uv.lock changes), hash-checked from the lock.
 COPY --from=uv /uv /usr/local/bin/uv
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --locked --no-dev --no-install-project
+# The tracing extra (OpenTelemetry) is installed but off: nothing is sent unless
+# OTEL_EXPORTER_OTLP_ENDPOINT is set (README: "Tracing").
+RUN uv sync --locked --no-dev --no-install-project --extra tracing
 
 # Chromium's system libraries (apt) and the headless shell, at the Playwright
 # version uv.lock pins.
@@ -38,7 +40,7 @@ RUN playwright install-deps chromium-headless-shell \
 
 COPY src ./src
 # The venv now holds its own copy of the package; drop uv and the sources.
-RUN uv sync --locked --no-dev --no-editable \
+RUN uv sync --locked --no-dev --no-editable --extra tracing \
  && rm /usr/local/bin/uv \
  && cd / && rm -rf /src
 

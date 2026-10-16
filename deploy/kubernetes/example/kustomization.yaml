@@ -12,6 +12,7 @@ components:
   - ../components/kata           # drop if you have no Kata (or gVisor) runtime
   - ../components/cilium-egress  # drop if your CNI isn't Cilium
   - ../components/prometheus     # drop if you have no Prometheus Operator (also drop --metrics-port below)
+  # - ../components/tracing      # optional OTLP traces; edit its endpoint, list it after cilium-egress (deploy/README.md)
 configMapGenerator:
   - name: deal-hunter-config
     files:

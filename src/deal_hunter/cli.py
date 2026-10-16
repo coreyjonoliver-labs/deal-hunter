@@ -12,6 +12,7 @@ from importlib import resources
 from pathlib import Path
 from urllib.parse import urlparse
 
+from deal_hunter import tracing
 from deal_hunter.discord import DiscordWebhook, sample_message, validate_webhook_url
 from deal_hunter.files import write_private
 from deal_hunter.render import build_config, render, required_env, secret_destinations
@@ -162,6 +163,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     except KeyboardInterrupt:
         return 130
+    finally:
+        # Any way out of `run` (aimm's SystemExit, an error, Ctrl+C): the last
+        # spans are exported, bounded, and the exporter stops. A no-op when off.
+        tracing.shutdown()
 
 
 def _interrupt(signum: int, frame: object) -> None:
@@ -393,6 +398,7 @@ def _restart() -> None:
     can't be restarted inside this process. This re-runs the process's own
     command line, not main()'s argv: it's for the command-line entry point.
     """
+    tracing.flush()  # execv keeps no threads or buffers: export what is pending, bounded
     os.execv(sys.executable, sys.orig_argv)  # noqa: S606 — the same command again
 
 
@@ -472,6 +478,10 @@ def _start(
     if destinations:
         print(f"Using {settings_path}: {', '.join(destinations)}", flush=True)
     print("Starting: ai-marketplace-monitor", " ".join(argv), flush=True)
+    # Off unless OTEL_EXPORTER_OTLP_ENDPOINT (or ..._TRACES_ENDPOINT) is set. Only the
+    # host is printed: an endpoint can carry credentials.
+    if tracing.setup():
+        print(f"Tracing: sending spans to {tracing.destination()} (OTLP/HTTP)", flush=True)
     # In this process, not `python -m`: that would put the current directory
     # first on sys.path. launch.main applies deal-hunter's fixes to aimm.
     from deal_hunter.launch import main as run_aimm

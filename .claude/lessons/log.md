@@ -278,3 +278,83 @@ consolidates recurring ones into rules.
   tags: [spec-drift, deviations]
   disposition: upheld
   finding: "An implementer-declared deviation from a requirement is folded into the spec text in the same change; a report-only deviation leaves the spec stale as the source of truth."
+
+- date: 2026-10-16
+  source: "otel-tracing / src/deal_hunter/tracing.py setup / security-auditor (HIGH)"
+  importance: 7
+  mechanizable: no
+  scope: unclassified
+  category: security
+  module: "src/deal_hunter/tracing.py"
+  tags: [third-party-sdk, logging, secrets, init-order, lastResort]
+  disposition: upheld
+  finding: "A third-party SDK that parses credentials from env may log them while parsing; install the redacting log handler (and propagate=False) before any SDK object is constructed, and validate the credential format yourself with a fixed, non-echoing error."
+
+- date: 2026-10-16
+  source: "otel-tracing / src/deal_hunter/tracing.py shutdown / security-auditor (MEDIUM)"
+  importance: 5
+  mechanizable: no
+  scope: unclassified
+  category: security
+  module: "src/deal_hunter/tracing.py"
+  tags: [bounded-shutdown, daemon-threads, logging, secrets]
+  recurrence_of: "2026-10-16 / install the redacting log handler before SDK construction"
+  disposition: upheld
+  finding: "A timeout-bounded shutdown abandons worker threads that keep running; don't tear down the redacting log hook (or any safety state) at shutdown while abandoned work can still emit — keep it for the life of the process."
+
+- date: 2026-10-16
+  source: "otel-tracing / src/deal_hunter/tracing.py _parse / security-auditor (MEDIUM)"
+  importance: 5
+  mechanizable: no
+  scope: unclassified
+  category: security
+  module: "src/deal_hunter/tracing.py"
+  tags: [https-only, credentials, url-parsing, parser-differential]
+  disposition: upheld
+  finding: "A credential-bearing endpoint must be https unless loopback/in-cluster, and the host validated must be read by the same parser the transport connects with (or both parsers must agree); count every carrier (headers, userinfo, query) as a credential."
+
+- date: 2026-10-16
+  source: "otel-tracing / deploy/kubernetes/components/tracing/kustomization.yaml / security-auditor (MEDIUM)"
+  importance: 4
+  mechanizable: yes
+  scope: unclassified
+  category: security
+  module: "deploy/kubernetes/components"
+  tags: [networkpolicy, egress, untrusted-browser]
+  finding: "An egress rule for the pod that hosts the untrusted browser names the destination pods (namespaceSelector AND podSelector in one `to` element), never a whole namespace."
+
+- date: 2026-10-16
+  source: "otel-tracing / docs/specs/otel-tracing.md / code-reviewer (HIGH)"
+  importance: 6
+  mechanizable: no
+  scope: unclassified
+  category: process
+  module: "docs/specs"
+  tags: [spec-drift, deviations]
+  recurrence_of: "2026-10-16 / implementer-declared deviation folded into the spec (ops-metrics)"
+  disposition: upheld
+  finding: "The implementer prompt must say to fold any deviation into the spec text in the same change; a report-only deviation recurred within a day and became a HIGH."
+
+- date: 2026-10-16
+  source: "ops-metrics + otel-tracing / tests/test_metrics.py:22, tests/test_events.py:374-386 / CI secret-scan (gitleaks generic-api-key)"
+  importance: 5
+  mechanizable: yes
+  scope: unclassified
+  category: build-test
+  module: "tests"
+  tags: [gitleaks, secret-scan, test-fixtures, entropy, history-rewrite, gate-gap]
+  recurrence_of: "2026-10-15 / scanner config taken from outside the checkout (gitleaks)"
+  disposition: upheld
+  finding: "Fake secrets in test fixtures must look fake and stay low-entropy (e.g. `tok-xxxxxxxxxx`, not `sk-test-0123456789abcdef`): CI's gitleaks scans every commit with no allowlist, so a realistic value fails secret-scan and only a history rewrite clears it. The local gate doesn't run gitleaks, so both reviewers passed it; run gitleaks (CI's flags, --log-opts=main..HEAD) before the first push."
+
+- date: 2026-10-16
+  source: "otel-tracing / tests/test_deploy.py:452 / CI CodeQL (py/redos, high)"
+  importance: 4
+  mechanizable: yes
+  scope: unclassified
+  category: build-test
+  module: "tests"
+  tags: [codeql, redos, regex, test-code, gate-gap]
+  recurrence_of: "2026-10-16 / CI-only scanner caught what the local gate missed (gitleaks fixtures)"
+  disposition: upheld
+  finding: "CodeQL scans test code too and the main-code-scanning ruleset blocks a new high alert anywhere: no nested quantifiers whose inner class can also match the separator (e.g. `(?:\\s+.*\\n)*?`, where \\s matches \\n). Check structured text (YAML) with a line scan or a declared parser, not a multi-line regex."

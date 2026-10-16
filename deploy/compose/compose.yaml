@@ -7,6 +7,10 @@
 #      ./facebook-session.json, readable by uid 1000.
 #   3. docker compose up -d, then open http://127.0.0.1:8740/.
 #
+#   Optional traces: add OTEL_EXPORTER_OTLP_ENDPOINT=https://<your collector>:4318 (and
+#   OTEL_EXPORTER_OTLP_HEADERS=... if it needs a token) to ./.env. Off without it
+#   (README: "Traces with OpenTelemetry"; ../README.md for the egress host).
+#
 # This limits what the containers can do on the host, not where the browser
 # can connect: Compose can't filter egress by host name, so the monitor can
 # reach your LAN and a cloud host's metadata service (169.254.169.254). The browser runs
