@@ -1,6 +1,6 @@
 # Spec: Graduate to the established profile
 
-**Status:** Implemented
+**Status:** Complete
 **Kind:** Implementation
 **Author:** Corey Oliver
 **Date:** 2026-10-15
@@ -69,8 +69,8 @@ pins, `launch.py`, `discord.py` and the dashboard; no Stop-hook gate for now.
 4a. A ruleset `main-code-scanning` on the default branch (operator-applied)
    shall block a merge on new CodeQL alerts (security high or higher, or
    errors). The `codeql` job alone only proves the analysis ran.
-5. The repo's secret scanning and push protection (free on public repos) shall
-   be enabled, and Actions shall require approval before running workflows from
+5. The repo's dependency graph, secret scanning and push protection (free on
+   public repos) shall be enabled, and Actions shall require approval before running workflows from
    any external contributor (operator-applied).
 6. `.claude/settings.json` (operator-applied) shall add
    `sandbox.failIfUnavailable: true` and `sandbox.allowUnsandboxedCommands:
@@ -182,6 +182,11 @@ None. After protection is on, every change to `main` goes through a PR.
    The boundary is a token that can't do those things: BACKLOG
    `scoped-agent-token` (a fine-grained `GH_TOKEN` for agent sessions with
    contents and pull-request write, no Administration or Actions write).
+7. **The dependency graph needed turning on.** It was off (the first
+   `dependency-review` run failed: "Dependency graph is not enabled"). Once the
+   operator enabled it, GitHub listed `uv.lock` as a parsed manifest and the
+   SBOM had 120 packages (114 in `uv.lock`, plus the actions and the root),
+   so transitive dependencies are reviewed.
 8. **A gitleaks false positive** can't be suppressed from the repo (the scan
    ignores `.gitleaks.toml`, `.gitleaksignore` and `gitleaks:allow` by
    design). The operator adds an allowlist entry (a finding fingerprint or a
@@ -191,10 +196,6 @@ None. After protection is on, every change to `main` goes through a PR.
    may fail and the required `codeql` check go red for an outside
    contributor. Accepted for a solo repo: the maintainer re-runs the change
    from a branch.
-7. Whether GitHub's dependency graph reads `uv.lock` (so transitive
-   dependencies are reviewed) is unverified — the SBOM endpoint returned 404
-   before this workflow existed. Check Insights → Dependency graph after it
-   lands; if only `pyproject.toml` is listed, record the gap in BACKLOG.
 
 ## Testing Strategy
 

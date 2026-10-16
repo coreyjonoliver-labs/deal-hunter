@@ -4,6 +4,32 @@ A running, dated log of completed work. Append a new entry (newest at the top)
 each time a spec reaches `Complete` or a meaningful milestone lands. This is the
 project's memory between sessions — `session-start` surfaces the latest entry.
 
+## 2026-10-15 — graduate-established
+
+- `main` is PR-only (merge commits, conversations resolved, admins bound),
+  with five required checks pinned to GitHub Actions: `test`, `image`
+  (`build.yml`), `secret-scan`, `dependency-review`, `codeql` (new
+  `security.yml`). The `main-code-scanning` ruleset blocks new CodeQL alerts
+  (security high+ / errors). Dependency graph, secret scanning and push
+  protection are on; fork-PR workflows need approval for every external
+  contributor. All read back live.
+- gitleaks takes its config and ignore file from the workflow and ignores
+  `gitleaks:allow`, so a PR can't allowlist its own secret (probed: the
+  default flags missed a planted key, these caught it).
+- `.github/CODEOWNERS` over the controls, `deploy/`, `Dockerfile`, the
+  dependency pins, `launch.py`, `discord.py` and the dashboard;
+  `tests/test_codeowners.py` keeps every owned path existing, case-exact.
+- `.claude/settings.json`: `failIfUnavailable`, `allowUnsandboxedCommands:
+  false`, and ask prompts on the `gh` subcommands that merge, publish or change
+  settings (a speed bump; the boundary is `scoped-agent-token`).
+- Gate: code-reviewer + security-auditor, 3 rounds, 0 CRITICAL/HIGH; checks
+  enforced (755 tests, ruff, mypy). Found and fixed: gitleaks honoured the
+  scanned tree's allowlists; required checks spoofable by name; the CodeQL job
+  didn't gate on alerts; the spec overclaimed the `gh` prompts and the publish
+  boundary. Residuals tracked: a workflow-editing PR sets its own checks (read
+  by hand); branch-built publishing (`immutable-release-tags`); the agent's
+  admin token (`scoped-agent-token`).
+
 ## 2026-10-15 — release-0-3-0
 
 - Published `ghcr.io/coreyjonoliver-labs/deal-hunter:0.3.0@sha256:f18291ac…56da`
