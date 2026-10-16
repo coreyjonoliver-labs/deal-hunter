@@ -1,0 +1,7 @@
+{
+  "spec": "release-0-3-0",
+  "date": "2026-10-15",
+  "review": ["code-reviewer", "security-auditor"],
+  "checks": "enforce",
+  "verdict": "pass"
+}

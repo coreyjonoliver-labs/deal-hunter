@@ -23,7 +23,7 @@ spec each.
   cards (photo, price, rating, AI summary, watch); spec Ready. Alerting is
   scoped to "a product you want just got listed" (operator decision
   2026-10-15)
-- [ ] release-0-3-0 — publish 0.3.0 (Discord alerts, search signal, rating
+- [x] release-0-3-0 — publish 0.3.0 (Discord alerts, search signal, rating
   summaries): version bump → main publishes + attests → strict verify → pin
   the digest in `deploy/` in a follow-up
 
@@ -45,7 +45,10 @@ spec each.
 - [ ] immutable-release-tags — CI republishes the version tag on every `main`
   build; publish per-commit tags or refuse an existing version; gate the
   `image`/`attest` jobs on `refs/heads/main` (`workflow_dispatch` on a branch
-  can publish and attest today) (workflow change: operator-only)
+  can publish and attest today) (workflow change: operator-only). Until then
+  the README's `docker run` examples pull by tag only (`:0.3.0`), so a paste
+  gets the latest `main` build; show `:<version>@sha256:<digest>` with a
+  pointer to the verify step in `deploy/README.md`
 - [ ] verify-pins-in-ci — a CI step that runs the strict
   `gh attestation verify` on the digest pinned in `deploy/`, so a pinning PR
   can't merge an unattested or branch-built digest (workflow change:
