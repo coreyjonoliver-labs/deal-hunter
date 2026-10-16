@@ -26,7 +26,7 @@ spec each.
 - [x] release-0-3-0 — publish 0.3.0 (Discord alerts, search signal, rating
   summaries): version bump → main publishes + attests → strict verify → pin
   the digest in `deploy/` in a follow-up
-- [ ] graduate-established — server-side merge boundary: required checks
+- [x] graduate-established — server-side merge boundary: required checks
   (test, image, secret-scan, dependency-review, codeql), branch protection,
   CODEOWNERS, sandbox `failIfUnavailable` (operator applies settings,
   workflow and protection)

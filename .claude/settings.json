@@ -20,7 +20,9 @@
     "closes the credential-read gap: without it a sandboxed command can still",
     "read ~/.aws/~/.ssh. autoAllowBashIfSandboxed runs sandboxed Bash without",
     "prompting (the OS boundary makes that safe). excludedCommands run OUTSIDE",
-    "the sandbox (gh/docker are incompatible) and fall back to normal prompts.",
+    "the sandbox (gh/docker are incompatible); with the blanket Bash allow only",
+    "the ask rules prompt, and those are a speed bump, not a boundary (spec",
+    "graduate-established, edge case 6).",
     "macOS needs nothing; Linux/WSL2 needs `bubblewrap` + `socat`. With",
     "failIfUnavailable unset (default false), a host missing those deps WARNS and",
     "runs unsandboxed rather than refusing to start — so shipping enabled is safe;",
@@ -36,6 +38,23 @@
       "Bash",
       "Grep",
       "Glob"
+    ],
+    "ask": [
+      "Bash(gh api *)",
+      "Bash(gh auth *)",
+      "Bash(gh alias *)",
+      "Bash(gh extension *)",
+      "Bash(gh pr merge)",
+      "Bash(gh pr merge *)",
+      "Bash(gh workflow *)",
+      "Bash(gh run *)",
+      "Bash(gh release *)",
+      "Bash(gh secret *)",
+      "Bash(gh variable *)",
+      "Bash(gh repo *)",
+      "Bash(gh ruleset *)",
+      "Bash(gh -R *)",
+      "Bash(gh --repo *)"
     ],
     "deny": [
       "Edit(./.claude/hooks/**)",
@@ -65,6 +84,8 @@
   },
   "sandbox": {
     "enabled": true,
+    "failIfUnavailable": true,
+    "allowUnsandboxedCommands": false,
     "autoAllowBashIfSandboxed": true,
     "filesystem": {
       "denyRead": [
