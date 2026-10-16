@@ -334,3 +334,15 @@ consolidates recurring ones into rules.
   recurrence_of: "2026-10-16 / implementer-declared deviation folded into the spec (ops-metrics)"
   disposition: upheld
   finding: "The implementer prompt must say to fold any deviation into the spec text in the same change; a report-only deviation recurred within a day and became a HIGH."
+
+- date: 2026-10-16
+  source: "ops-metrics + otel-tracing / tests/test_metrics.py:22, tests/test_events.py:374-386 / CI secret-scan (gitleaks generic-api-key)"
+  importance: 5
+  mechanizable: yes
+  scope: unclassified
+  category: build-test
+  module: "tests"
+  tags: [gitleaks, secret-scan, test-fixtures, entropy, history-rewrite, gate-gap]
+  recurrence_of: "2026-10-15 / scanner config taken from outside the checkout (gitleaks)"
+  disposition: upheld
+  finding: "Fake secrets in test fixtures must look fake and stay low-entropy (e.g. `tok-xxxxxxxxxx`, not `sk-test-0123456789abcdef`): CI's gitleaks scans every commit with no allowlist, so a realistic value fails secret-scan and only a history rewrite clears it. The local gate doesn't run gitleaks, so both reviewers passed it; run gitleaks (CI's flags, --log-opts=main..HEAD) before the first push."
