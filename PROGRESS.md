@@ -4,6 +4,35 @@ A running, dated log of completed work. Append a new entry (newest at the top)
 each time a spec reaches `Complete` or a meaningful milestone lands. This is the
 project's memory between sessions — `session-start` surfaces the latest entry.
 
+## 2026-10-16 — otel-tracing
+
+- `run` exports OpenTelemetry traces over OTLP/HTTP when
+  `OTEL_EXPORTER_OTLP_(TRACES_)ENDPOINT` is set (off otherwise;
+  `OTEL_SDK_DISABLED` / `OTEL_TRACES_EXPORTER=none` turn it off). Spans per
+  watch's search cycle: `search` (results parse), `navigate` (with watch and
+  phrase index), `listing`, `ai_rate` (provider, model, tokens, rating),
+  `notify`, `session_save`.
+- An allowlist span processor rebuilds every span with only validated keys
+  (no listing text, phrase, location, URL or exception message; fixed ERROR
+  descriptions); no-op global propagator, no auto-instrumentation, so no
+  `traceparent` reaches Facebook, the AI provider or notifiers.
+- Collector credentials: headers validated before the SDK exists and never
+  echoed; the logging hook stays for the life of the process; a token
+  (headers, userinfo or query) goes only over https, loopback or `.svc`;
+  endpoints the two URL parsers read differently are refused; endpoint
+  credentials redacted from the events file.
+- Bounded flush (≤ 5 s) before exec and at exit; export errors at most once a
+  minute. OpenTelemetry 1.45.0 in an optional `tracing` extra (also the dev
+  group, a test keeps them equal), installed in the image.
+- `deploy/kubernetes/components/tracing/`: endpoint env on `monitor`, egress to
+  the collector pods (namespace AND pod selector) on 4318.
+- Gate: code-reviewer + security-auditor, 3 rounds, 0 CRITICAL/HIGH; checks
+  enforced (1061 passed, 1 skipped, ruff, format, mypy). Found and fixed: a
+  malformed headers value printed the token to stderr; spans leaked to the
+  same after shutdown; plain-http tokens; namespace-wide egress; spec drift.
+  LOWs tracked (`tracing-followups`). Not run here: `docker build`,
+  kubeconform.
+
 ## 2026-10-16 — ops-metrics
 
 - `deal-hunter web --metrics-port` serves Prometheus `/metrics` on its own

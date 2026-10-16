@@ -427,3 +427,65 @@ def test_prometheus_patch_index_is_the_web_container() -> None:
             names.append(m.group(1))
     assert names.index("web") == 1
     assert "containers/1/" in (PROMETHEUS / "kustomization.yaml").read_text()
+
+
+# --- The tracing component --------------------------------------------------------
+
+TRACING = ROOT / "deploy/kubernetes/components/tracing"
+
+
+def test_tracing_component_sets_only_the_endpoint_on_the_monitor_container() -> None:
+    text = (TRACING / "kustomization.yaml").read_text()
+    assert "kind: Component" in text
+    # Matched by container name, not index, so the monitor stays the target if the order moves.
+    assert "- name: monitor" in text and "containers/" not in text
+    assert text.count("- name: OTEL_") == 1 and "name: OTEL_EXPORTER_OTLP_ENDPOINT" in text
+    # No credential, header or sampler is baked in; the token comes from the Secret.
+    assert "name: OTEL_EXPORTER_OTLP_HEADERS" not in text
+    assert "value: http://otel-collector." in text  # a generic placeholder, edited per cluster
+    # One egress rule, to the collector's port only; nothing is opened on the pod.
+    assert text.count("path: /spec/egress/-") == 1 and "port: 4318" in text
+    assert "ingress" not in text.split("patches:")[1]
+    # The rule names the collector's pods, not the whole namespace: namespaceSelector and
+    # podSelector are one `to` element (same indent), so they AND together.
+    assert re.search(
+        r"- namespaceSelector:\n(?:\s+.*\n)*?\s+podSelector:\n\s+matchLabels:\n\s+"
+        r"app\.kubernetes\.io/name: opentelemetry-collector",
+        text,
+    )
+    assert "use https" in text
+    # The label is listed among the things to edit, with the consequence of getting it wrong.
+    edit_section = text.split("apiVersion:")[0]
+    assert (
+        "podSelector" in edit_section and "silently blocks export" in edit_section
+    )  # the plain-http placeholder says when not to
+
+
+def test_tracing_is_not_in_the_example_overlay() -> None:
+    # Tracing is opt-in: copying the example must not point a pod at a collector that isn't there.
+    example = (ROOT / "deploy/kubernetes/example/kustomization.yaml").read_text()
+    active = [line for line in example.splitlines() if not line.lstrip().startswith("#")]
+    assert not [line for line in active if "components/tracing" in line]
+    assert "components/tracing" in example  # but the way to turn it on is shown
+
+
+@pytest.mark.skipif(shutil.which("kustomize") is None, reason="kustomize is not installed")
+def test_tracing_component_renders_after_cilium_egress(tmp_path: Path) -> None:
+    kustomize = shutil.which("kustomize") or "kustomize"
+    shutil.copytree(ROOT / "deploy/kubernetes", tmp_path / "k8s")
+    overlay = tmp_path / "k8s" / "overlay"
+    overlay.mkdir()
+    (overlay / "kustomization.yaml").write_text(
+        "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n"
+        "resources:\n  - ../base\n"
+        "components:\n  - ../components/cilium-egress\n  - ../components/tracing\n"
+    )
+    done = subprocess.run(  # noqa: S603 — fixed argv
+        [kustomize, "build", str(overlay)], capture_output=True, text=True, check=False
+    )
+    assert done.returncode == 0, done.stderr
+    out = done.stdout
+    assert "OTEL_EXPORTER_OTLP_ENDPOINT" in out and "port: 4318" in out
+    assert "app.kubernetes.io/name: opentelemetry-collector" in out
+    # On the monitor container, not the dashboard's.
+    assert out.index("OTEL_EXPORTER_OTLP_ENDPOINT") < out.index("name: web")

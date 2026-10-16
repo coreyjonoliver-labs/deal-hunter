@@ -79,8 +79,22 @@
     decided there is something to send by then, so a batch of already-notified
     listings or an unconfigured notifier is not an attempt.
 
+11. Traces follow the same patch points. With an OTLP endpoint set (tracing.py),
+    ``MarketplaceMonitor.search_item`` (one watch's round) is the root
+    ``deal_hunter.cycle`` span, and under it: ``get_listings`` (the phrase
+    search: ``search_with_session``'s counted call), page loads
+    (``goto_url_with_timeout``, one span for the load and its retries),
+    ``FacebookMarketplace.get_listing_details``, ``OpenAIBackend.evaluate`` and
+    ``AnthropicBackend.evaluate`` (every other backend inherits one), each
+    notification attempt of 10, and the session save. Token counts, AI retries
+    and the new-listing count come from aimm's own log events through
+    ``TraceTap``, which reads them the way ``events.py`` does. Spans carry
+    allowlisted numbers, names and outcomes only (tracing.py); never a phrase,
+    listing text, URL, location or exception message. With tracing off every
+    wrapper is a straight call.
+
 ``deal-hunter run`` starts aimm through ``main`` in the same process, which
-applies all ten. aimm is pinned, and tests/test_launch.py checks the patch points
+applies all eleven. aimm is pinned, and tests/test_launch.py checks the patch points
 still exist.
 
 This deliberately has no ``python -m`` entry: ``-m`` puts the current
@@ -100,7 +114,7 @@ from collections.abc import Callable, Iterator
 from logging import Logger
 from typing import Any
 
-from ai_marketplace_monitor.ai import AIResponse
+from ai_marketplace_monitor.ai import AIResponse, AnthropicBackend, OpenAIBackend
 from ai_marketplace_monitor.email_notify import EmailNotificationConfig
 from ai_marketplace_monitor.facebook import FacebookMarketplace, FacebookSearchResultPage
 from ai_marketplace_monitor.monitor import MarketplaceMonitor
@@ -108,7 +122,7 @@ from ai_marketplace_monitor.notification import NotificationConfig
 from ai_marketplace_monitor.utils import aimm_event, amm_home, is_substring
 from playwright.sync_api import Error as PlaywrightError
 
-from deal_hunter import discord, events
+from deal_hunter import discord, events, tracing
 from deal_hunter import session as fb_session
 from deal_hunter.discord import DiscordWebhook
 from deal_hunter.session import Session, SessionError
@@ -147,13 +161,48 @@ def is_substring_without_urls(
 
 
 def goto_url_with_timeout(self: Any, url: str, attempt: int = 0) -> None:
-    """aimm's Marketplace.goto_url, with a page-load timeout instead of none."""
+    """aimm's Marketplace.goto_url, with a page-load timeout instead of none.
+
+    As a trace, a page load is one ``deal_hunter.navigate`` span from the first
+    try to the last: the retries (attempt > 0, called from inside the first)
+    only raise the span's attempt count.
+    """
+    if attempt:
+        tracing.annotate(tracing.NAVIGATE, tracing.ATTEMPT, attempt)
+        _navigate(self, url, attempt)
+        return
+    with tracing.span(tracing.NAVIGATE, {tracing.ATTEMPT: 0, **_phrase_of(url)}) as span:
+        _navigate(self, url, 0)
+        span.outcome("ok")
+
+
+def _phrase_of(url: str) -> dict[str, Any]:
+    """The watch and phrase a page load belongs to, while a search is running.
+
+    A search-page load is for the phrase about to be parsed; a listing page is
+    for the one just parsed. The URL is only looked at, never recorded.
+    """
+    if _Search.watch is None:
+        return {}
+    attributes: dict[str, Any] = {tracing.WATCH: _Search.watch}
+    n = max(_Search.phrases, 1)
+    if "/marketplace/item/" in url and _Search.phrases_done:
+        attributes[tracing.PHRASE_INDEX] = (_Search.phrases_done - 1) % n
+    elif "/search?" in url:
+        attributes[tracing.PHRASE_INDEX] = _Search.phrases_done % n
+    return attributes
+
+
+def _navigate(self: Any, url: str, attempt: int) -> None:
     try:
         if self.page is None:  # aimm asserts here; same retry path
             raise RuntimeError("no browser page")
         if self.logger:
             self.logger.debug(f"[Retrieve] Navigating to {url}")
-        self.page.goto(url, timeout=NAV_TIMEOUT_MS)
+        response = self.page.goto(url, timeout=NAV_TIMEOUT_MS)
+        status = getattr(response, "status", None)
+        if isinstance(status, int):
+            tracing.annotate(tracing.NAVIGATE, tracing.STATUS_CODE, status)
         self.page.wait_for_load_state("domcontentloaded", timeout=NAV_TIMEOUT_MS)
     except KeyboardInterrupt:
         raise
@@ -180,6 +229,10 @@ _summary_warned = False
 _upstream_notify_all = NotificationConfig.__dict__["notify_all"].__func__
 _upstream_send_with_retry = NotificationConfig.send_message_with_retry
 _upstream_send_email = EmailNotificationConfig.send_email_message
+_upstream_search_item = MarketplaceMonitor.search_item
+_upstream_get_listing_details = FacebookMarketplace.get_listing_details
+_upstream_openai_evaluate = OpenAIBackend.evaluate
+_upstream_anthropic_evaluate = AnthropicBackend.evaluate
 # The values a notification event's method may take (metrics label values).
 NOTIFY_METHODS = (*NOTIFIERS, *DEAL_HUNTER_NOTIFIERS)
 NOTIFY_LOGGER = logging.getLogger("monitor")
@@ -262,12 +315,17 @@ def record_notification(logger: Logger | None, method: Any, ok: bool) -> None:
 
 
 def _recorded(method: Any, logger: Logger | None, send: Callable[[], Any]) -> bool:
-    try:
-        ok = bool(send())
-    except Exception:
-        record_notification(logger, method, False)
-        raise
-    record_notification(logger, method, ok)
+    label = method if method in NOTIFY_METHODS else "other"
+    with tracing.span(tracing.NOTIFY, {tracing.NOTIFY_METHOD: label}) as span:
+        try:
+            ok = bool(send())
+        except Exception:
+            record_notification(logger, method, False)
+            raise
+        record_notification(logger, method, ok)
+        span.outcome("sent" if ok else "failed")
+        if not ok:
+            span.fail()
     return ok
 
 
@@ -305,15 +363,21 @@ def notify_all_with_discord(
     if cls is not NotificationConfig or DISCORD is None:
         return upstream_result
     force = bool(kwargs.get("force", False))
-    try:
-        discord_ok = discord.notify(DISCORD, listings, ratings, statuses, force=force)
-    except Exception as e:  # noqa: BLE001 — a card bug must not stop the other notifiers' result
-        NOTIFY_LOGGER.error(f"[Discord] Couldn't build the cards: {type(e).__name__}")
-        discord_ok = False
     # Only a batch with something new is an attempt (discord.notify sends nothing,
     # and answers False, when every listing was already notified).
-    if force or any(getattr(s, "name", "") != "NOTIFIED" for s in statuses):
-        record_notification(NOTIFY_LOGGER, "discord", discord_ok)
+    attempt = force or any(getattr(s, "name", "") != "NOTIFIED" for s in statuses)
+    with tracing.span(tracing.NOTIFY, {tracing.NOTIFY_METHOD: "discord"}, record=attempt) as span:
+        try:
+            discord_ok = discord.notify(DISCORD, listings, ratings, statuses, force=force)
+        except Exception as e:  # noqa: BLE001 — a card bug must not stop the other notifiers' result
+            NOTIFY_LOGGER.error(f"[Discord] Couldn't build the cards: {type(e).__name__}")
+            discord_ok = False
+            span.fail(e)
+        if attempt:
+            record_notification(NOTIFY_LOGGER, "discord", discord_ok)
+            span.outcome("sent" if discord_ok else "failed")
+            if not discord_ok:
+                span.fail()
     return upstream_result or discord_ok
 
 
@@ -432,21 +496,124 @@ def get_listings_counted(self: Any) -> Any:
 
     aimm calls it once per search phrase, for each city in turn, so within a
     watch's search the phrase index is the number of calls so far, modulo the
-    watch's phrase count.
+    watch's phrase count. That call is the ``deal_hunter.search`` span: the
+    page load before it is its own ``deal_hunter.navigate`` span.
     """
-    listings = _upstream_get_listings(self)
     watch = _Search.watch
-    if watch is not None:
-        index = _Search.phrases_done % max(_Search.phrases, 1)
-        _Search.phrases_done += 1
-        logger = self.logger
-        if logger:
-            count = len(listings)
-            event = aimm_event("search_results", item=watch, phrase_index=index, count=count)
-            logger.info(f"[Search] {count} listings for phrase #{index}", extra=event)
-            if count == 0:
-                logger.warning(f"No search results for watch '{watch}' phrase #{index}")
+    if watch is None:
+        return _upstream_get_listings(self)
+    index = _Search.phrases_done % max(_Search.phrases, 1)
+    attributes = {tracing.WATCH: watch, tracing.PHRASE_INDEX: index}
+    with tracing.span(tracing.SEARCH, attributes) as span:
+        listings = _upstream_get_listings(self)
+        span.set(tracing.count("listings"), len(listings))
+        span.outcome("ok" if listings else "empty")
+    _Search.phrases_done += 1
+    logger = self.logger
+    if logger:
+        count = len(listings)
+        event = aimm_event("search_results", item=watch, phrase_index=index, count=count)
+        logger.info(f"[Search] {count} listings for phrase #{index}", extra=event)
+        if count == 0:
+            logger.warning(f"No search results for watch '{watch}' phrase #{index}")
     return listings
+
+
+def search_item_traced(
+    self: Any, marketplace_config: Any, marketplace: Any, item_config: Any
+) -> None:
+    """MarketplaceMonitor.search_item, as the root ``deal_hunter.cycle`` span.
+
+    aimm schedules each watch as its own job, so a cycle is one watch's round:
+    its phrase searches, listing fetches, AI ratings and notifications.
+    """
+    if not tracing.enabled():
+        return _upstream_search_item(self, marketplace_config, marketplace, item_config)
+    with tracing.span(tracing.CYCLE, {tracing.WATCH: getattr(item_config, "name", None)}) as span:
+        _upstream_search_item(self, marketplace_config, marketplace, item_config)
+        span.outcome("ok")
+    return None
+
+
+def get_listing_details_traced(self: Any, *args: Any, **kwargs: Any) -> Any:
+    """FacebookMarketplace.get_listing_details, as a ``deal_hunter.listing`` span.
+
+    aimm answers ``(listing, from_cache)``; a listing already in its cache costs
+    no page load, and shows as outcome "cached".
+    """
+    with tracing.span(tracing.LISTING) as span:
+        result = _upstream_get_listing_details(self, *args, **kwargs)
+        cached = isinstance(result, tuple) and len(result) == 2 and result[1] is True
+        span.outcome("cached" if cached else "ok")
+    return result
+
+
+def _traced_evaluate(upstream: Callable[..., Any]) -> Callable[..., Any]:
+    """An AI backend's ``evaluate`` as a ``deal_hunter.ai_rate`` span."""
+
+    def evaluate(self: Any, listing: Any, item_config: Any, marketplace_config: Any) -> Any:
+        if not tracing.enabled():
+            return upstream(self, listing, item_config, marketplace_config)
+        config = self.config
+        provider = getattr(config, "provider", None) or getattr(config, "name", None)
+        attributes = {
+            tracing.GEN_AI_SYSTEM: provider.lower() if isinstance(provider, str) else None,
+            tracing.GEN_AI_MODEL: getattr(config, "model", None)
+            or getattr(self, "default_model", None),
+        }
+        with tracing.span(tracing.AI_RATE, attributes) as span:
+            rating = upstream(self, listing, item_config, marketplace_config)
+            span.set(tracing.RATING, getattr(rating, "score", None))
+            span.outcome("ok")
+        return rating
+
+    evaluate.__name__ = "evaluate"
+    return evaluate
+
+
+openai_evaluate_traced = _traced_evaluate(_upstream_openai_evaluate)
+anthropic_evaluate_traced = _traced_evaluate(_upstream_anthropic_evaluate)
+
+
+# aimm's hilight() markup around the tags it logs the API response and errors under.
+_AI_RESPONSE = "[blue][AI-Response][/blue]"
+_AI_ERROR = "[red][AI-Error][/red]"
+
+
+class TraceTap(logging.Handler):
+    """Hands aimm's own log events to the span they belong to.
+
+    Token counts are in the debug dump of the API response (``events.ai_usage``
+    reads them for the events file, from the response's usage block only), an
+    AI retry is an ``[AI-Error]`` line, and ``search_summary`` carries how many
+    new listings the round found. Only integers are taken; no text is kept.
+    """
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            if not tracing.enabled():
+                return
+            aimm = getattr(record, "aimm", None)
+            if isinstance(aimm, dict):
+                if aimm.get("kind") == "search_summary":
+                    tracing.annotate(tracing.CYCLE, tracing.count("new"), aimm.get("new_count"))
+                return
+            # Only aimm's own lines from the backends' evaluate: a listing's title
+            # can sit anywhere else in a message, but never first in one of these.
+            if record.funcName != "evaluate":
+                return
+            message = record.getMessage()
+            if message.startswith(_AI_RESPONSE):
+                usage = events.ai_usage(message, 0.0)
+                if usage:
+                    tracing.annotate(tracing.AI_RATE, tracing.TOKENS_IN, usage.get("input_tokens"))
+                    tracing.annotate(
+                        tracing.AI_RATE, tracing.TOKENS_OUT, usage.get("output_tokens")
+                    )
+            elif message.startswith(_AI_ERROR):
+                tracing.increment(tracing.AI_RATE, tracing.ATTEMPT)
+        except Exception:  # noqa: BLE001, S110 — never break the monitor over a trace
+            pass
 
 
 def search_with_session(self: Any, item_config: Any) -> Iterator[Any]:
@@ -492,7 +659,9 @@ def _check_login(market: Any) -> None:
 
 def _save(market: Any, session: Session) -> None:
     try:
-        excluded = fb_session.save(market.page.context, session.path)
+        with tracing.span(tracing.SESSION_SAVE) as span:
+            excluded = fb_session.save(market.page.context, session.path)
+            span.outcome("ok")
     except (OSError, SessionError, PlaywrightError) as e:  # keep running
         reason = e.strerror if isinstance(e, OSError) else fb_session.first_line(e)
         if market.logger:
@@ -586,6 +755,13 @@ def main(
     NotificationConfig.notify_all = classmethod(notify_all_with_discord)  # type: ignore[assignment]
     NotificationConfig.send_message_with_retry = send_message_recorded  # type: ignore[method-assign]
     EmailNotificationConfig.send_email_message = send_email_recorded  # type: ignore[method-assign]
+    monitor.MarketplaceMonitor.search_item = search_item_traced  # type: ignore[method-assign]
+    facebook.FacebookMarketplace.get_listing_details = get_listing_details_traced  # type: ignore[method-assign]
+    ai.OpenAIBackend.evaluate = openai_evaluate_traced  # type: ignore[method-assign]
+    ai.AnthropicBackend.evaluate = anthropic_evaluate_traced  # type: ignore[method-assign]
+    monitor_logger = logging.getLogger("monitor")
+    if tracing.enabled() and not any(isinstance(h, TraceTap) for h in monitor_logger.handlers):
+        monitor_logger.addHandler(TraceTap())
     monitor.MarketplaceMonitor._launch_browser = launch_browser  # type: ignore[method-assign]
     monitor.MarketplaceMonitor.__init__ = monitor_init  # type: ignore[method-assign]
     app(args=args, prog_name="ai-marketplace-monitor")

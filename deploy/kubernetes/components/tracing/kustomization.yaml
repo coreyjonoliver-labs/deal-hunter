@@ -1,0 +1,66 @@
+# OpenTelemetry traces from the monitor to an OTLP/HTTP collector in your
+# cluster. Optional: without this component tracing is off (no endpoint set).
+# Only the monitor container is traced, not the dashboard.
+#
+# Edit before use (or patch them from your overlay):
+# - OTEL_EXPORTER_OTLP_ENDPOINT: your collector's OTLP/HTTP address (port 4318
+#   by default; the SDK adds /v1/traces). The value here is a placeholder.
+# - the egress rule below: the namespace and the pod labels the collector runs
+#   with (the podSelector's app.kubernetes.io/name value is a placeholder). A
+#   wrong label silently blocks export: the monitor runs fine, spans just never
+#   arrive, and the only sign is the once-a-minute "couldn't export spans" line.
+# - Credentials for a collector that needs a token (OTEL_EXPORTER_OTLP_HEADERS)
+#   belong in the credentials Secret the monitor already reads, not in this file.
+#
+# What spans carry, and what they never do, is in the main README ("Traces with
+# OpenTelemetry"): the collector sees watch names, timings and counts, no
+# listing text, phrase, location or secret.
+#
+# - The image installs the `tracing` extra already; nothing else to build.
+# - List this component after cilium-egress in your overlay: that component
+#   replaces the base policy's egress rules, so a rule added before it is lost.
+#   Cilium unions this rule with cnp.yaml's; if your Cilium setup is stricter
+#   than that, allow the collector in cnp.yaml as well.
+# - A collector outside the cluster: replace the egress rule with an ipBlock or
+#   your CNI's FQDN rule, and use an https:// endpoint.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+patches:
+  - target:
+      kind: Deployment
+      name: deal-hunter
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: deal-hunter
+      spec:
+        template:
+          spec:
+            containers:
+              - name: monitor
+                env:
+                  # Plain http is fine for an in-cluster .svc address without a
+                  # token. With a token (OTEL_EXPORTER_OTLP_HEADERS), use https or
+                  # an in-cluster service: `run` refuses a token over http to any
+                  # other host, with exit code 2.
+                  - name: OTEL_EXPORTER_OTLP_ENDPOINT
+                    value: http://otel-collector.observability.svc.cluster.local:4318
+  - target:
+      kind: NetworkPolicy
+      name: deal-hunter
+    patch: |-
+      - op: add
+        path: /spec/egress/-
+        value:
+          to:
+            # One element, so the two selectors AND: the collector's pods in
+            # that namespace, not everything in it.
+            - namespaceSelector:
+                matchLabels:
+                  kubernetes.io/metadata.name: observability
+              podSelector:
+                matchLabels:
+                  app.kubernetes.io/name: opentelemetry-collector  # edit to match your collector's pods
+          ports:
+            - {protocol: TCP, port: 4318}

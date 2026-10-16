@@ -12,11 +12,29 @@ dependencies = [
   "tomli>=2.0; python_version < '3.11'",
 ]
 
+[project.optional-dependencies]
+# Traces over OTLP/HTTP, off unless OTEL_EXPORTER_OTLP_ENDPOINT is set (tracing.py).
+# Pinned exactly, like aimm: the span processor and exporter wiring is written
+# against this release's SDK. The image installs this extra.
+tracing = [
+  "opentelemetry-api==1.45.0",
+  "opentelemetry-sdk==1.45.0",
+  "opentelemetry-exporter-otlp-proto-http==1.45.0",
+]
+
 [project.scripts]
 deal-hunter = "deal_hunter.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.10"]
+# The tracing packages are here too so CI's plain `uv sync --locked` runs tracing's tests.
+dev = [
+  "pytest>=8",
+  "ruff>=0.6",
+  "mypy>=1.10",
+  "opentelemetry-api==1.45.0",
+  "opentelemetry-sdk==1.45.0",
+  "opentelemetry-exporter-otlp-proto-http==1.45.0",
+]
 
 [build-system]
 requires = ["hatchling"]

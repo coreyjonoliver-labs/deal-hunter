@@ -34,7 +34,7 @@ spec each.
   session expiry, AI spend, notifications) + generic ServiceMonitor and alert
   rules in `deploy/` (picked up 2026-10-16, operator: ops-metrics then
   otel-tracing)
-- [ ] otel-tracing — OTLP traces per search cycle with an attribute allowlist,
+- [x] otel-tracing — OTLP traces per search cycle with an attribute allowlist,
   off by default; builds on ops-metrics' notification/search events
 
 ## Up Next
@@ -46,6 +46,15 @@ spec each.
   module; `notification` events from `launch.py` patch 10; the metrics port's
   IP-literal/allowed-host rule; `send_message_with_retry` and
   `send_email_message` in the bump-aimm patch list (skill dir: operator-only)
+  — and for otel-tracing: the allowlist rule (add a validator, never relax
+  the processor), the `tracing` module, `TraceTap`, the four tracing patch
+  points (`search_item`, `get_listing_details`, `OpenAIBackend.evaluate`,
+  `AnthropicBackend.evaluate`) in the bump-aimm list, doc-table rows
+- [ ] tracing-followups — `ExportErrors` labels every `opentelemetry` WARNING
+  as an export failure, so a bad `OTEL_RESOURCE_ATTRIBUTES` at setup prints a
+  false "couldn't export" and uses up the once-a-minute slot (give config
+  warnings their own fixed line); refuse `%` in the endpoint host and port 0;
+  redact `unquote`d header values and bare bearer tokens in the events file
 - [ ] bump-aimm — ai-marketplace-monitor 0.10.2 → latest. Upstream fixes the
   unconditional "Failed to get search results" and adds login recovery /
   search-radius handling, but changes every function deal-hunter

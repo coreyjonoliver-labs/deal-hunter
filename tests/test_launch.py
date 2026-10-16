@@ -138,6 +138,10 @@ def test_main_patches_then_runs_aimm(
         (NotificationConfig, "notify_all"),
         (NotificationConfig, "send_message_with_retry"),
         (EmailNotificationConfig, "send_email_message"),
+        (monitor.MarketplaceMonitor, "search_item"),
+        (facebook.FacebookMarketplace, "get_listing_details"),
+        (ai.OpenAIBackend, "evaluate"),
+        (ai.AnthropicBackend, "evaluate"),
     ]:
         monkeypatch.setattr(cls, name, getattr(cls, name))
     monkeypatch.setattr(launch, "SESSION", None)
@@ -171,6 +175,10 @@ def test_main_patches_then_runs_aimm(
     assert launch.DISCORD is not None and launch.DISCORD.timeout == 10
     assert NotificationConfig.send_message_with_retry is launch.send_message_recorded
     assert EmailNotificationConfig.send_email_message is launch.send_email_recorded
+    assert monitor.MarketplaceMonitor.search_item is launch.search_item_traced
+    assert facebook.FacebookMarketplace.get_listing_details is launch.get_listing_details_traced
+    assert ai.OpenAIBackend.evaluate is launch.openai_evaluate_traced
+    assert ai.AnthropicBackend.evaluate is launch.anthropic_evaluate_traced
     assert launch.SESSION == sess and launch.SANDBOX is False
     assert os.umask(0o022) == 0o077  # files aimm writes are owner-only
     monitor_logger = logging.getLogger("monitor")
@@ -179,6 +187,8 @@ def test_main_patches_then_runs_aimm(
         monitor_logger.removeHandler(h)
     assert [h.path for h in recorders] == [fb_session.AIMM_HOME / events.EVENTS_NAME]
     assert [h.hidden for h in recorders] == [["springfieldtest"]]
+    # Tracing is off, so nothing taps aimm's log for spans.
+    assert not [h for h in monitor_logger.handlers if isinstance(h, launch.TraceTap)]
     # The patched gate drops the trimmer and keeps a real listing.
     assert not seen[0](profile.NUC_KEYWORDS, TRIMMER)
     assert seen[0](profile.NUC_KEYWORDS, "Intel NUC8i5.BEH/16GB, https://x.io/a")
@@ -1659,3 +1669,96 @@ def test_discord_with_everything_already_notified_is_not_an_attempt(
         UserConfig(name="me"), [_listing()], rated(1), [NotificationStatus.NOTIFIED]
     )
     assert read() == []
+
+
+# --- tracing --------------------------------------------------------------------
+
+
+def test_tracing_patch_points_still_exist() -> None:
+    # search_item is one watch's round, scheduled as its own job (so it is the root
+    # span), and logs the new-listing count that TraceTap reads.
+    params = ["self", "marketplace_config", "marketplace", "item_config"]
+    assert list(inspect.signature(monitor.MarketplaceMonitor.search_item).parameters) == params
+    assert "scheduled.do(\n                        self.search_item," in inspect.getsource(
+        monitor.MarketplaceMonitor.schedule_jobs
+    )
+    search_item = inspect.getsource(monitor.MarketplaceMonitor.search_item)
+    assert '"search_summary"' in search_item and "new_count=len(new_listings)" in search_item
+    assert launch._upstream_search_item.__qualname__ == "MarketplaceMonitor.search_item"
+    # get_listing_details answers (listing, from_cache), and search handles its errors.
+    params = ["self", "post_url", "item_config", "price", "title"]
+    details = facebook.FacebookMarketplace.get_listing_details
+    assert list(inspect.signature(details).parameters) == params
+    source = inspect.getsource(details)
+    assert "return details, True" in source and "return details, False" in source
+    assert "self.goto_url(post_url)" in source
+    assert launch._upstream_get_listing_details.__qualname__ == (
+        "FacebookMarketplace.get_listing_details"
+    )
+    # Each backend family has one evaluate; the other providers inherit OpenAI's.
+    for backend in (ai.OpenAIBackend, ai.AnthropicBackend):
+        params = ["self", "listing", "item_config", "marketplace_config"]
+        assert list(inspect.signature(launch._traced_evaluate(backend.evaluate)).parameters) == [
+            "self",
+            "listing",
+            "item_config",
+            "marketplace_config",
+        ]
+        assert list(inspect.signature(backend.evaluate).parameters) == params
+        source = inspect.getsource(backend.evaluate)
+        # The log lines TraceTap reads (tokens, retries), and the retry loop they count.
+        assert 'hilight("[AI-Response]", "info")' in source
+        assert 'hilight("[AI-Error]", "fail")' in source and "retries += 1" in source
+    assert utils.hilight("[AI-Response]", "info") == launch._AI_RESPONSE
+    assert utils.hilight("[AI-Error]", "fail") == launch._AI_ERROR
+    for inherited in (ai.DeepSeekBackend, ai.GeminiBackend, ai.OllamaBackend):
+        assert "evaluate" not in vars(inherited), inherited
+    assert issubclass(ai.DeepSeekBackend, ai.OpenAIBackend)
+    assert launch._upstream_openai_evaluate.__qualname__ == "OpenAIBackend.evaluate"
+    assert launch._upstream_anthropic_evaluate.__qualname__ == "AnthropicBackend.evaluate"
+
+
+def test_main_taps_aimm_logs_for_spans_only_when_tracing_is_on(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, request_finalizer: list[Any]
+) -> None:
+    import ai_marketplace_monitor.cli
+
+    for cls, name in [
+        (marketplace.Marketplace, "goto_url"),
+        (marketplace.Marketplace, "create_page"),
+        (facebook.FacebookMarketplace, "login"),
+        (facebook.FacebookMarketplace, "search"),
+        (facebook.FacebookSearchResultPage, "get_listings"),
+        (ai.AIResponse, "to_cache"),
+        (monitor.MarketplaceMonitor, "_launch_browser"),
+        (monitor.MarketplaceMonitor, "__init__"),
+        (NotificationConfig, "notify_all"),
+        (NotificationConfig, "send_message_with_retry"),
+        (EmailNotificationConfig, "send_email_message"),
+        (monitor.MarketplaceMonitor, "search_item"),
+        (facebook.FacebookMarketplace, "get_listing_details"),
+        (ai.OpenAIBackend, "evaluate"),
+        (ai.AnthropicBackend, "evaluate"),
+    ]:
+        monkeypatch.setattr(cls, name, getattr(cls, name))
+    monkeypatch.setattr(facebook, "is_substring", utils.is_substring)
+    monkeypatch.setattr(ai, "re", ai.re)
+    monkeypatch.setattr(launch, "SESSION", None)
+    monkeypatch.setattr(launch, "SANDBOX", True)
+    monkeypatch.setattr(launch, "DISCORD", None)
+    monkeypatch.setattr(ai_marketplace_monitor.cli, "app", lambda **kw: None)
+    old_umask = os.umask(0o022)
+    request_finalizer.append(lambda: os.umask(old_umask))
+    monitor_logger = logging.getLogger("monitor")
+    before = list(monitor_logger.handlers)
+    request_finalizer.append(
+        lambda: [
+            monitor_logger.removeHandler(h) for h in monitor_logger.handlers if h not in before
+        ]
+    )
+    config = tmp_path / "c.toml"
+    config.write_text('[marketplace.facebook]\nsearch_city = "springfieldtest"\n')
+    monkeypatch.setattr(launch.tracing, "enabled", lambda: True)
+    launch.main(["--config", str(config)])
+    launch.main(["--config", str(config)])  # once, not once per call
+    assert len([h for h in monitor_logger.handlers if isinstance(h, launch.TraceTap)]) == 1

@@ -26,6 +26,19 @@ def no_real_home(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempP
 
 
 @pytest.fixture(autouse=True)
+def no_otel_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """A developer's own OTEL_* variables must not turn tracing on in a test."""
+    for name in [n for n in os.environ if n.startswith("OTEL_")]:
+        monkeypatch.delenv(name)
+    yield
+    # A test that left tracing on would trace (and slow) every test after it.
+    from deal_hunter import tracing
+
+    tracing.shutdown(timeout_s=1)
+    tracing._unhook_logging()  # production keeps the hook for the life of the process
+
+
+@pytest.fixture(autouse=True)
 def restore_sigterm() -> Iterator[None]:
     """cli.main installs a SIGTERM handler; don't let it outlive the test."""
     saved = signal.getsignal(signal.SIGTERM)

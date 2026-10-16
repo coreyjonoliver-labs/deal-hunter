@@ -36,6 +36,11 @@ desktop, in Docker, or on Kubernetes (`deploy/`). **The repo is public.**
   Chromium), de-duplication (a diskcache SQLite cache), AI calls and
   notifications. deal-hunter generates its config and patches it at start.
 - **Dashboard:** stdlib `http.server`, server-rendered HTML, no JavaScript.
+- **Tracing (optional):** OpenTelemetry traces over OTLP/HTTP from `run`
+  (`tracing.py`; the `tracing` extra, installed in the image), off unless
+  `OTEL_EXPORTER_OTLP_ENDPOINT` is set. A span processor allowlists what leaves:
+  no listing text, phrase, location, URL or exception message, and no trace
+  context on outbound requests.
 - **Image:** `Dockerfile` (uid 1000, read-only root), published to GHCR with
   SLSA build provenance by `.github/workflows/build.yml`.
 

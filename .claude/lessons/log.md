@@ -278,3 +278,59 @@ consolidates recurring ones into rules.
   tags: [spec-drift, deviations]
   disposition: upheld
   finding: "An implementer-declared deviation from a requirement is folded into the spec text in the same change; a report-only deviation leaves the spec stale as the source of truth."
+
+- date: 2026-10-16
+  source: "otel-tracing / src/deal_hunter/tracing.py setup / security-auditor (HIGH)"
+  importance: 7
+  mechanizable: no
+  scope: unclassified
+  category: security
+  module: "src/deal_hunter/tracing.py"
+  tags: [third-party-sdk, logging, secrets, init-order, lastResort]
+  disposition: upheld
+  finding: "A third-party SDK that parses credentials from env may log them while parsing; install the redacting log handler (and propagate=False) before any SDK object is constructed, and validate the credential format yourself with a fixed, non-echoing error."
+
+- date: 2026-10-16
+  source: "otel-tracing / src/deal_hunter/tracing.py shutdown / security-auditor (MEDIUM)"
+  importance: 5
+  mechanizable: no
+  scope: unclassified
+  category: security
+  module: "src/deal_hunter/tracing.py"
+  tags: [bounded-shutdown, daemon-threads, logging, secrets]
+  recurrence_of: "2026-10-16 / install the redacting log handler before SDK construction"
+  disposition: upheld
+  finding: "A timeout-bounded shutdown abandons worker threads that keep running; don't tear down the redacting log hook (or any safety state) at shutdown while abandoned work can still emit — keep it for the life of the process."
+
+- date: 2026-10-16
+  source: "otel-tracing / src/deal_hunter/tracing.py _parse / security-auditor (MEDIUM)"
+  importance: 5
+  mechanizable: no
+  scope: unclassified
+  category: security
+  module: "src/deal_hunter/tracing.py"
+  tags: [https-only, credentials, url-parsing, parser-differential]
+  disposition: upheld
+  finding: "A credential-bearing endpoint must be https unless loopback/in-cluster, and the host validated must be read by the same parser the transport connects with (or both parsers must agree); count every carrier (headers, userinfo, query) as a credential."
+
+- date: 2026-10-16
+  source: "otel-tracing / deploy/kubernetes/components/tracing/kustomization.yaml / security-auditor (MEDIUM)"
+  importance: 4
+  mechanizable: yes
+  scope: unclassified
+  category: security
+  module: "deploy/kubernetes/components"
+  tags: [networkpolicy, egress, untrusted-browser]
+  finding: "An egress rule for the pod that hosts the untrusted browser names the destination pods (namespaceSelector AND podSelector in one `to` element), never a whole namespace."
+
+- date: 2026-10-16
+  source: "otel-tracing / docs/specs/otel-tracing.md / code-reviewer (HIGH)"
+  importance: 6
+  mechanizable: no
+  scope: unclassified
+  category: process
+  module: "docs/specs"
+  tags: [spec-drift, deviations]
+  recurrence_of: "2026-10-16 / implementer-declared deviation folded into the spec (ops-metrics)"
+  disposition: upheld
+  finding: "The implementer prompt must say to fold any deviation into the spec text in the same change; a report-only deviation recurred within a day and became a HIGH."

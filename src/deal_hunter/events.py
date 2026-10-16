@@ -25,7 +25,7 @@ import stat
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import parse_qsl, quote, urlparse
 
 EVENTS_NAME = "deal-hunter-events.jsonl"
 # Its name before the project was renamed: `run` moves it, `web` reads it until then.
@@ -46,7 +46,10 @@ _MODEL = re.compile(r"\bmodel='([\w.:/-]+)'")
 _KINDS = {"search_summary", "browser_ready", "search_results", "notification"}
 _FIELDS = {"item", "new_count", "engine", "sandbox", "phrase_index", "count", "method", "outcome"}
 # Env vars whose values never go in the file.
-_SECRET_ENV = re.compile(r"(KEY|TOKEN|PASSWORD|SECRET|TOPIC|CHAT_ID|USERNAME|CREDENTIALS?)$")
+# HEADERS: OTEL_EXPORTER_OTLP_HEADERS carries a collector token (tracing.py).
+_SECRET_ENV = re.compile(
+    r"(KEY|TOKEN|PASSWORD|SECRET|TOPIC|CHAT_ID|USERNAME|CREDENTIALS?|HEADERS)$"
+)
 # A webhook URL ends in its token, which is a secret on its own (a log line may
 # carry the token without the rest of the URL).
 _WEBHOOK_ENV = re.compile(r"WEBHOOK(?:_URL)?$")
@@ -56,6 +59,34 @@ _OVERRIDE = re.compile(r"Overriding .* with value ")
 # Matched at the start of a message logged by FacebookMarketplace.search itself:
 # a seller can put the same words in a title that aimm logs elsewhere.
 _FALSE_SEARCH_FAILURE = re.compile(r"\[Search\] Failed to get search results for ")
+
+
+def _endpoint_secrets(env: Any) -> set[str]:
+    """Credentials in ``*_ENDPOINT`` URLs (userinfo, query) and header values in ``*HEADERS``.
+
+    The host and path of an endpoint are not secret, and are left alone.
+    """
+    found: set[str] = set()
+    for name, value in env.items():
+        upper = name.upper()
+        if upper.endswith("_ENDPOINT"):
+            try:
+                parsed = urlparse(value.strip())
+            except ValueError:
+                continue
+            if parsed.password:
+                found |= {parsed.password, f"{parsed.username or ''}:{parsed.password}"}
+            if parsed.username:  # https://TOKEN@host
+                found.add(parsed.username)
+            if parsed.query:
+                found.add(parsed.query)
+                found |= {v for _, v in parse_qsl(parsed.query) if len(v) >= 4}
+        elif upper.endswith("HEADERS"):
+            for pair in value.split(","):
+                _, found_eq, v = pair.partition("=")
+                if found_eq and len(v.strip()) >= 4:
+                    found.add(v.strip())
+    return {v for v in found if len(v) >= 4}
 
 
 def secret_values() -> list[str]:
@@ -70,6 +101,7 @@ def secret_values() -> list[str]:
             token = v.strip().split("?")[0].rstrip("/").rpartition("/")[2]
             if len(token) >= 8:
                 values.add(token)
+    values |= _endpoint_secrets(os.environ)
     values |= {quote(v, safe="") for v in values}
     return sorted(values, key=len, reverse=True)
 
