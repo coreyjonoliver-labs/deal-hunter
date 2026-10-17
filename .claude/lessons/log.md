@@ -429,3 +429,15 @@ consolidates recurring ones into rules.
   recurrence_of: "2026-10-16 / implementer-declared deviation folded into the spec (otel-tracing)"
   disposition: upheld
   finding: "Third occurrence: the implementer listed 'decisions beyond the spec' in its report and left the spec alone, though its prompt said to fold deviations in. 'Beyond the spec' counts as a deviation; the prompt should say so explicitly."
+
+- date: 2026-10-16
+  source: "manual / /contribute-lesson / coreyjonoliver-labs/claude-spec-workflow#60"
+  importance: 1
+  mechanizable: no
+  scope: repo-neutral
+  category: process
+  module: "docs/specs"
+  tags: [spec-drift, deviations, upstreamed]
+  recurrence_of: "2026-10-16 / implementer-declared deviation folded into the spec (ops-metrics)"
+  disposition: upheld
+  finding: "Upstreamed (claude-spec-workflow#60): the plugin's implementer writes any decision that departs from or pins spec behavior into the spec text first, and the code-reviewer flags a report-only deviation (HIGH). The cause was the implementer's own output format. Don't re-contribute; once a plugin release ships it, /retrospect can retire curated rule 5 as enforced by the agent definitions."
