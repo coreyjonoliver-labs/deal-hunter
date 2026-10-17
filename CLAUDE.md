@@ -182,5 +182,7 @@ silent allow. Non-`Complete` status values are never gated.
 - **`BACKLOG.md`** — the queue (Current Focus / Up Next / Later).
 - **`PROGRESS.md`** — the dated log of what's been completed.
 - **`docs/roadmap.md`** — phase sequencing / dependency map (points at specs).
+- **`.claude/lessons/`** — the compounding loop (`/learn`, `/retrospect`);
+  `.claude/rules/lessons.md` is the curated set.
 
 Consult them before starting; update them as work moves.
