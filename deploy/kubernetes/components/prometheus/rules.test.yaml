@@ -42,6 +42,9 @@ tests:
           - exp_labels:
               severity: critical
               job: deal-hunter
+            exp_annotations:
+              summary: "deal-hunter has not found any listings for longer than its search interval allows"
+              description: "No search round returned listings since the heartbeat (deal_hunter_last_success_timestamp_seconds), or the metric is missing. Check the dashboard's status and recent problems."
 
   - name: no heartbeat series at all alerts (absent guard)
     interval: 1m
@@ -54,6 +57,9 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: critical
+            exp_annotations:
+              summary: "deal-hunter has not found any listings for longer than its search interval allows"
+              description: "No search round returned listings since the heartbeat (deal_hunter_last_success_timestamp_seconds), or the metric is missing. Check the dashboard's status and recent problems."
 
   - name: nothing scraped at all also alerts
     interval: 1m
@@ -66,6 +72,9 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: critical
+            exp_annotations:
+              summary: "deal-hunter has not found any listings for longer than its search interval allows"
+              description: "No search round returned listings since the heartbeat (deal_hunter_last_success_timestamp_seconds), or the metric is missing. Check the dashboard's status and recent problems."
 
   # --- DealHunterSessionExpiringSoon / DealHunterSessionExpired ------------
   - name: a cookie expiring in 2 days is expiring soon, not expired
@@ -82,6 +91,9 @@ tests:
           - exp_labels:
               severity: warning
               job: deal-hunter
+            exp_annotations:
+              summary: "The Facebook login cookie expires within 3 days"
+              description: "Run `deal-hunter login` and update the session Secret before it expires."
       - eval_time: 1h
         alertname: DealHunterSessionExpired
         exp_alerts: []
@@ -115,6 +127,9 @@ tests:
           - exp_labels:
               severity: critical
               job: deal-hunter
+            exp_annotations:
+              summary: "deal-hunter has no valid Facebook login"
+              description: "The saved session expired or was never saved. Run `deal-hunter login` and update the session Secret."
       - eval_time: 1h
         alertname: DealHunterSessionExpiringSoon
         exp_alerts: []
@@ -131,6 +146,9 @@ tests:
           - exp_labels:
               severity: critical
               job: deal-hunter
+            exp_annotations:
+              summary: "deal-hunter has no valid Facebook login"
+              description: "The saved session expired or was never saved. Run `deal-hunter login` and update the session Secret."
 
   - name: an anonymous monitor exports no session series, so the session rules stay quiet
     interval: 1m
@@ -159,6 +177,9 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: warning
+            exp_annotations:
+              summary: "More than half of deal-hunter's phrase searches returned nothing"
+              description: "75% of phrase searches failed over the last hour. Facebook may be blocking the monitor or have changed its page."
 
   - name: mostly succeeding searches do not alert
     interval: 5m
@@ -196,6 +217,9 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: warning
+            exp_annotations:
+              summary: "deal-hunter's estimated AI spend over the last day is above the threshold"
+              description: "Estimated 2.88 dollars over 24 hours. A prompt or watch change re-rates listings; check the dashboard's AI usage."
 
   - name: spending below the threshold does not alert
     interval: 10m

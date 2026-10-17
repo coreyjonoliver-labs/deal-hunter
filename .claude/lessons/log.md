@@ -370,3 +370,62 @@ consolidates recurring ones into rules.
   recurrence_of: "2026-10-15 / README docker run examples tag-only (release-0-3-0, LOW)"
   disposition: upheld
   finding: "Every copy-pasteable image reference (README examples included, not only deploy/) pins `:<version>@sha256:<digest>`; a release's pin step updates them with deploy/, and the pin test should cover them so they can't be left tag-only or stale."
+
+- date: 2026-10-16
+  source: "ci-parity / tests/test_deploy.py promtool test, rules.test.yaml / coordinator (first run)"
+  importance: 5
+  mechanizable: yes
+  scope: unclassified
+  category: build-test
+  module: "deploy/kubernetes/components/prometheus"
+  tags: [promtool, skipped-test, unexecuted-test, ci]
+  recurrence_of: "2026-10-16 / a test that skips without its tool proves nothing (promtool)"
+  disposition: upheld
+  finding: "Confirmed: the never-run promtool tests failed on their first run (promtool compares annotations exactly; none were listed). A tool-dependent test needs an env switch that turns its skip into a failure, set in CI, before anyone relies on it."
+
+- date: 2026-10-16
+  source: "ci-parity / scripts/git-hooks/pre-push / code-reviewer + security-auditor (HIGH, round 1)"
+  importance: 7
+  mechanizable: yes
+  scope: unclassified
+  category: security
+  module: "scripts/git-hooks"
+  tags: [gitleaks, fail-open, exit-code, scanner, gitattributes, color]
+  disposition: upheld
+  finding: "Never trust a scanner's exit code alone: gitleaks 8.30.1 exits 0 with 'no leaks found' when its git child warns, or when colour or `.gitattributes` (-diff, binary, negative patterns) hide the diff. Neutralize the inputs (GIT_ATTR_SOURCE empty tree, --no-color --text --no-textconv --no-ext-diff) and fail on an ERR line or a zero scanned count, and test each bypass with the real tool."
+
+- date: 2026-10-16
+  source: "ci-parity / .github/workflows/security.yml secret-scan / security-auditor (HIGH, pre-existing)"
+  importance: 8
+  mechanizable: yes
+  scope: unclassified
+  category: security
+  module: ".github/workflows/security.yml"
+  tags: [gitleaks, required-check, bypass, gitattributes, ci]
+  recurrence_of: "2026-10-16 / never trust a scanner's exit code alone (pre-push hook)"
+  disposition: upheld
+  finding: "A required scan is only a gate if the scanned tree can't blind it: one committed `.gitattributes` line made CI's secret-scan pass while scanning nothing. Test the CI step's own script (extracted from the workflow) against bypass repos, so the check is verified, not assumed."
+
+- date: 2026-10-16
+  source: "ci-parity / pre-push + security.yml log-opts / security-auditor (HIGH, round 2)"
+  importance: 7
+  mechanizable: yes
+  scope: unclassified
+  category: security
+  module: "scripts/git-hooks"
+  tags: [gitleaks, merge-commit, evil-merge, git-log, diff-merges]
+  recurrence_of: "2026-10-16 / never trust a scanner's exit code alone (pre-push hook)"
+  disposition: upheld
+  finding: "git log shows no diff for merge commits by default, so a history scanner built on it misses secrets added in a conflict resolution; use --diff-merges=first-parent (not --cc/combined, which gitleaks parses as nothing), plus --root, and never pre-filter with --no-merges."
+
+- date: 2026-10-16
+  source: "ci-parity / docs/specs/ci-parity.md / code-reviewer (MEDIUM, round 1)"
+  importance: 4
+  mechanizable: no
+  scope: unclassified
+  category: process
+  module: "docs/specs"
+  tags: [spec-drift, deviations]
+  recurrence_of: "2026-10-16 / implementer-declared deviation folded into the spec (otel-tracing)"
+  disposition: upheld
+  finding: "Third occurrence: the implementer listed 'decisions beyond the spec' in its report and left the spec alone, though its prompt said to fold deviations in. 'Beyond the spec' counts as a deviation; the prompt should say so explicitly."

@@ -37,6 +37,21 @@ kubeconform -strict -ignore-missing-schemas -` and `docker compose config -q` (f
 a scratch copy of `deploy/compose/` with empty `.env`, `deal-hunter.toml` and
 `facebook-session.json`; don't leave them in the repo).
 
+**CI runs two scanners the local gate doesn't:** gitleaks (`security.yml`
+`secret-scan`, every commit, no allowlist) and CodeQL (a new high alert anywhere,
+tests included, blocks the merge). Both reviewers have passed changes these
+failed. Enable the pre-push hook once (`git config core.hooksPath
+scripts/git-hooks`, with gitleaks at `security.yml`'s version): it runs CI's
+gitleaks over the commits you're pushing, so a finding is caught before it needs
+a history rewrite. gitleaks 8.30.1 exits 0 when it scanned nothing or didn't see
+a diff (its `git` child failed; colour, `.gitattributes` or replace refs changed
+the log; a merge's own changes aren't shown by default), so both the hook and
+CI's step neutralize attributes, colour and replace refs, scan merges against
+their first parent (`--diff-merges=first-parent`) and root commits, and block
+on an `ERR` line or a zero commit count. Keep those in step when changing
+either; `tests/test_ci_parity.py` runs both against each bypass. gitleaks's
+default path allowlist (images, lockfiles) still applies.
+
 ## Testing
 
 - **pytest**, one `tests/test_<module>.py` per `src/deal_hunter/<module>.py`.
@@ -59,6 +74,25 @@ a scratch copy of `deploy/compose/` with empty `.env`, `deal-hunter.toml` and
   pass `now=`; the Discord sender takes an injectable `sleep` and transport), no
   skipped tests without a reason. Code that does HTTP is tested against a local
   `http.server` on an ephemeral port (`tests/test_discord.py`), not a mock.
+- **Fake secrets look fake.** A fixture key, token or password stays
+  low-entropy (`tok-xxxxxxxxxx`, `sk-test-fake-key-xxxxxxxx`), never a realistic
+  value: gitleaks scans every commit, so a realistic one fails CI until history
+  is rewritten. A test that needs a realistic secret builds it at runtime from
+  pieces, in a temp dir.
+- **No backtracking regexes, in tests too.** No nested quantifier whose inner
+  class can also match the separator (`(?:\s+.*\n)*?`: `\s` matches `\n`);
+  CodeQL flags it as `py/redos`. Check structured text (YAML, workflows) with a
+  line scan or a parser, anchored on the entry you mean, and assert how many
+  matches you expect so zero fails.
+- **A test that skips without its tool proves nothing until CI runs it.** The
+  promtool rule tests (`tests/test_deploy.py`) skip without `promtool`, but CI
+  installs it and sets `DEAL_HUNTER_REQUIRE_PROMTOOL=1` so they fail there
+  instead. A new tool-dependent test gets the same treatment before an
+  acceptance criterion relies on it.
+- The `opentelemetry-*` packages are pinned in both the `tracing` extra and the
+  `dev` group (a test keeps them equal), so CI's plain `uv sync --locked` runs
+  `tests/test_tracing.py`. The exporter path is tested against a local
+  `http.server` collector, never a mock.
 - No coverage threshold is configured; cover the behavior a spec asks for and
   the error branches.
 
@@ -171,6 +205,38 @@ and controls aimm's home directory; the dashboard has no login.
   links only from `links.py`. The aimm hook is `notify_all`, posting only on
   the top-level call (`cls is NotificationConfig`), because aimm recurses into
   every notifier subclass with the same classmethod.
+- **Traces leave the process, so code decides what they carry.** Every span
+  passes `tracing.AllowlistSpanProcessor`, which rebuilds it with only the keys
+  in `_VALIDATORS` (plus `deal_hunter.count.<name>`) whose values pass their
+  validator, drops events and links, replaces any ERROR description with
+  `"<span> failed"` and renames unknown spans `deal_hunter.other`. To export
+  something new, add a validator and a test in `tests/test_tracing.py`; never
+  relax the processor. Never put listing text, a phrase, a URL, the location or
+  an exception message on a span (record `type(exc).__name__`): the browser is
+  untrusted, so it can steer any attribute a validator doesn't bound. No HTTP
+  auto-instrumentation and a no-op global propagator, so no `traceparent` or
+  `baggage` reaches Facebook, the AI provider or a notifier.
+- **`OTEL_EXPORTER_OTLP_*` values are credentials** (headers, endpoint
+  userinfo and query strings). Never print them. They're validated before the
+  SDK is built, with a fixed error that doesn't echo them, because the SDK logs
+  a malformed header with its value; the redacting logging hook goes on before
+  any SDK object exists and stays for the life of the process, because
+  abandoned export threads keep logging after a bounded shutdown. A token goes
+  only over https, loopback or an in-cluster `.svc` host, and the host checked
+  is the one urllib3 connects to (refuse what the two parsers read
+  differently). Resource attributes and the credential-provider variable are
+  operator-set and outside the allowlist.
+- **`/metrics` (`web --metrics-port`)** answers only a Host that is an IP
+  literal (Prometheus scrapes by IP) or one of the dashboard's allowed names,
+  which stops DNS rebinding; every listener that can bind loopback needs that
+  check. Label values come only from configured watch names, a strict model
+  pattern capped at 20 values, and fixed method and outcome sets. The events
+  file is untrusted: events stamped more than 300 s in the future are ignored.
+- **Egress from the monitor's pod is the browser's egress.** A NetworkPolicy
+  rule names the destination pods (`namespaceSelector` AND `podSelector` in one
+  `to` element), never a whole namespace, and every host added to an egress
+  allowlist is named in `deploy/README.md` as a possible exfiltration channel,
+  with rotating its credential in the compromise steps.
 - **Dependencies:** `ai-marketplace-monitor` is pinned exactly; everything is
   locked in `uv.lock` (install with `uv sync --locked`). Docker base images are
   pinned by digest. A new dependency needs a stated reason.
@@ -189,6 +255,19 @@ and controls aimm's home directory; the dashboard has no login.
   "Overriding ... with value" and "Failed to get search results" lines (the
   latter is logged after every search); `launch` records a `search_results`
   event per phrase instead. Never log a token, the session, or a full AI request.
+- **Notification events:** `launch.py` patch 10 records each notification
+  attempt as a `notification` event (method, outcome); `web --metrics-port`
+  serves them with the rest of the metrics.
+- **A fallback never hides its failure.** A background refresh that keeps
+  serving the last good value surfaces the error on the consumer's path (a
+  gauge, a flag, a one-line log); dropping one rejected item counts as success
+  only if something was accepted.
+- **Spans** open with `tracing.span()` at `launch.py`'s patch points, on their
+  own stack rather than OTel's ambient context (aimm's `search` is a
+  generator). Tokens, AI retries and the new-listing count reach spans only
+  through `launch.TraceTap` and the `search_summary` event; `TraceTap` trusts
+  only records from `evaluate` that start with aimm's exact
+  `[blue][AI-Response][/blue]` or `[red][AI-Error][/red]` prefix.
 
 ## Naming & structure
 
@@ -198,7 +277,13 @@ and controls aimm's home directory; the dashboard has no login.
   login save/load), `events` (event log), `dashboard` (`web`), `filters`
   (aimm's filters applied outside it), `files` (private writes), `discord`
   (Discord cards and the webhook sender), `links` (the allowlisted Marketplace
-  item and fbcdn photo URLs, shared by the dashboard and Discord).
+  item and fbcdn photo URLs, shared by the dashboard and Discord), `metrics`
+  (Prometheus exposition from the dashboard `Snapshot`), `tracing`
+  (OpenTelemetry setup from `OTEL_*` env, the allowlist span processor, the
+  no-op propagator, bounded flush and shutdown; the SDK is the optional
+  `tracing` extra, imported only when an endpoint is set).
+- `scripts/git-hooks/` holds opt-in git hooks (the pre-push secret scan);
+  `tests/test_ci_parity.py` keeps their tool versions equal to CI's.
 - snake_case functions, UPPER_CASE module constants, leading underscore for
   module-private helpers. Domain data (keywords, prompts) is plain data in
   `profile.py` so it can be tested.
@@ -220,6 +305,10 @@ touched:
 | `src/deal_hunter/example-settings.toml` | a settings key is added, renamed or its default changes |
 | `deploy/README.md` and `deploy/` | the image's mounts, users, ports, egress needs or isolation advice change |
 | `docs/specs/<spec>.md` | the spec's scope or acceptance criteria change during implementation |
+| `README.md` "Traces with OpenTelemetry" table, `docs/specs/otel-tracing.md` | `tracing.py` spans, attributes or validators change |
+| `deploy/README.md` "Traces", `deploy/kubernetes/components/tracing/` | the tracing component, OTel env or its egress changes |
+| `README.md` "Metrics for Prometheus" table, `deploy/kubernetes/components/prometheus/` rules and `rules.test.yaml` | `metrics.py` series or labels change |
+| `scripts/git-hooks/pre-push`, `build.yml`'s promtool step | gitleaks's version in `security.yml` or the promtool pin changes (the parity test fails until they match) |
 | `pyproject.toml` version | a user-visible change ships (the version is the image tag; pin its digest in `deploy/` in a follow-up once `main` publishes it) |
 
 **Self-referential rule:** if a change adds a new doc file or changes what this
@@ -232,6 +321,9 @@ skill or `CLAUDE.md` covers, update this checklist too.
 ### Add a feature
 1. Write or open a spec (`/spec <name>`); fill requirements + acceptance criteria.
 2. Run `/review-gate <name>` (implementer → reviewer → security-auditor → fix loop).
+   If the implementation deviates from a requirement, change the spec text in
+   the same change; a deviation only in the implementer's report leaves the
+   spec stale (the reviewer flags it as HIGH).
 3. On a green gate: tick `BACKLOG.md`, update the roadmap row, append to
    `PROGRESS.md`, confirm docs moved.
 
@@ -283,7 +375,20 @@ skill or `CLAUDE.md` covers, update this checklist too.
    error that `events.py` drops and the `get_listings` count in `launch.py`
    replaces (`test_search_results_patch_points_still_exist`); a release that
    logs it only for an empty search makes the drop unnecessary.
-3. Docs: the pinned version in README.
+3. Also re-check the patch points added since: `NotificationConfig.send_message_with_retry`
+   and `EmailNotificationConfig.send_email_message`
+   (`test_notification_patch_points_still_exist`), and the four tracing patch
+   points (`test_tracing_patch_points_still_exist`):
+   `MarketplaceMonitor.search_item` (its signature, `scheduled.do(self.search_item, …)`
+   in `schedule_jobs`, the `search_summary` event with `new_count`),
+   `FacebookMarketplace.get_listing_details` (signature and the
+   `(listing, from_cache)` return), and `OpenAIBackend.evaluate` /
+   `AnthropicBackend.evaluate` (signatures, the `hilight("[AI-Response]", "info")`
+   and `hilight("[AI-Error]", "fail")` lines, the `retries += 1` loop, and that the
+   DeepSeek, Gemini and Ollama backends still inherit OpenAI's `evaluate`). Then
+   run `tests/test_tracing.py`, whose faked cycle runs aimm's real `search_item`,
+   `search`, `evaluate` and `notify_all`.
+4. Docs: the pinned version in README.
 
 ### Change the deploy manifests
 1. Keep them generic: no personal domains, locations or cluster names.
@@ -297,4 +402,26 @@ skill or `CLAUDE.md` covers, update this checklist too.
    `base/deployment.yaml` and `deploy/compose/compose.yaml`. The example
    overlay inherits the base's pin; don't give it an `images:` entry.
    `tests/test_deploy.py` fails on pins newer than the package, a missing
-   digest, or files that disagree.
+   digest, or files that disagree. Update the README's image references in the
+   same change, `docker run` examples included (`:<version>@sha256:<digest>`);
+   the test doesn't check them yet.
+
+## Review checklist
+
+Recurring findings that reviewers upheld (lessons log; curated in
+`.claude/rules/lessons.md`). The code-reviewer and security-auditor check each
+change against these as well as the sections above:
+
+- **Spec drift:** any deviation from a requirement is in the spec text, not
+  only the implementer's report.
+- **CI-only scanners:** no realistic-looking secret in a committed fixture; no
+  nested-quantifier regex (tests included); the pre-push scan was run or the
+  change can't add a secret.
+- **Credentials and third-party SDKs:** an SDK that parses credentials from env
+  has the redacting log hook installed before it's constructed and kept for the
+  process lifetime; the credential is validated without echoing it.
+- **Credential endpoints:** https unless loopback/`.svc`, the host checked by
+  the parser that connects, every carrier (headers, userinfo, query) treated as
+  a credential.
+- **Listeners:** any HTTP listener that can bind loopback checks Host.
+- **Fallbacks:** a cached or isolated failure is visible to the consumer.
