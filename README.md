@@ -564,3 +564,28 @@ uv run ruff check . && uv run mypy
 ai-marketplace-monitor's own keyword matcher. `tests/test_render.py` loads the
 generated config with its real `Config` class, so upstream schema changes show up
 as test failures.
+
+### Pre-push secret scan
+
+CI scans every commit with gitleaks 8.30.1 (`security.yml`), and a secret that
+reaches a pushed commit needs a history rewrite. An opt-in git hook runs the
+same scan on the commits you're about to push:
+
+```sh
+git config core.hooksPath scripts/git-hooks
+```
+
+Install [gitleaks 8.30.1](https://github.com/gitleaks/gitleaks/releases/tag/v8.30.1)
+first (`brew install gitleaks` if that is the version it gives you). The hook
+blocks the push if gitleaks finds something, is missing, is a different
+version, logs an error, or scans no commits when the push changes files. It
+ignores `gitleaks:allow` comments, the repo's own gitleaks config, committed `.gitattributes`,
+replace refs and your git colour settings, and it scans what a merge commit
+changed against its first parent, as CI does. gitleaks's default path
+allowlist (images, lockfiles such as `package-lock.json` and `go.sum`) still
+applies. Commits that a remote-tracking ref of
+the remote you push to already has aren't scanned, and neither are branch
+deletions. Skip it for one push with `git push --no-verify`.
+
+The promtool alert-rule tests skip when `promtool` isn't installed; CI
+requires them (`DEAL_HUNTER_REQUIRE_PROMTOOL=1`).

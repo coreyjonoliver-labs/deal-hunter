@@ -4,6 +4,33 @@ A running, dated log of completed work. Append a new entry (newest at the top)
 each time a spec reaches `Complete` or a meaningful milestone lands. This is the
 project's memory between sessions — `session-start` surfaces the latest entry.
 
+## 2026-10-16 — ci-parity
+
+- The Prometheus alert-rule unit tests ran for the first time and failed: all
+  eight alert cases lacked `exp_annotations` (rule logic was right). Fixed, and
+  CI's `test` job now installs promtool 3.15.0 (SHA-256 pinned) and sets
+  `DEAL_HUNTER_REQUIRE_PROMTOOL=1`, so they fail there instead of skipping.
+- Opt-in pre-push hook `scripts/git-hooks/pre-push` (`git config
+  core.hooksPath scripts/git-hooks`) runs CI's gitleaks over the commits being
+  pushed that the target remote doesn't have.
+- gitleaks 8.30.1 reports "no leaks found" and exits 0 when it saw nothing: its
+  git child warned (a negative `.gitattributes` pattern, an ambiguous ref),
+  colour or `-diff`/`binary` attributes hid the diff, replace refs or
+  `log.showRoot=false` changed the log, or the secret was only in a merge
+  commit's own diff. CI's required `secret-scan` had the same bypasses. Both
+  the hook and the CI step now set `GIT_ATTR_SOURCE` (empty tree) and
+  `GIT_NO_REPLACE_OBJECTS=1`, pass `--no-color --text --no-textconv
+  --no-ext-diff --root --diff-merges=first-parent`, and fail on an `ERR` line
+  or a zero commit count. `tests/test_ci_parity.py` (56 tests) runs the hook
+  and the workflow step's own script against each bypass with real gitleaks,
+  and keeps versions and flags in step.
+- Conventions skill: the ops-metrics/otel-tracing additions, fixture and regex
+  rules for CI's scanners, the spec-deviation rule, and a review checklist
+  from the upheld lesson clusters.
+- Gate: 3 rounds, code-reviewer + security-auditor; final 0 CRITICAL/HIGH.
+  1118 tests with the operator patches applied; ruff, mypy clean. Follow-ups
+  in `ci-parity-followups`.
+
 ## 2026-10-16 — release-0-4-0
 
 - Published `ghcr.io/coreyjonoliver-labs/deal-hunter:0.4.0@sha256:e673b929…d413`

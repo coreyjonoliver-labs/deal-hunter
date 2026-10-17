@@ -12,6 +12,7 @@ known keys (the kustomizations' `images:` entries, the Compose and Deployment
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -408,8 +409,13 @@ def test_prometheus_component_exposes_only_the_metrics_port() -> None:
     assert "kind: ServiceMonitor" in (PROMETHEUS / "servicemonitor.yaml").read_text()
 
 
-@pytest.mark.skipif(shutil.which("promtool") is None, reason="promtool is not installed")
 def test_prometheus_rules_pass_their_unit_tests(tmp_path: Path) -> None:
+    # CI sets DEAL_HUNTER_REQUIRE_PROMTOOL=1 so a missing promtool fails the
+    # build instead of skipping the test (spec ci-parity).
+    if shutil.which("promtool") is None:
+        if os.environ.get("DEAL_HUNTER_REQUIRE_PROMTOOL") == "1":
+            pytest.fail("promtool is not installed, but DEAL_HUNTER_REQUIRE_PROMTOOL=1 requires it")
+        pytest.skip("promtool is not installed")
     (tmp_path / "rules.yaml").write_text(
         rules_file((PROMETHEUS / "prometheusrule.yaml").read_text())
     )

@@ -1,0 +1,122 @@
+#!/bin/sh
+# Pre-push secret scan: CI's gitleaks check, run before the first push
+# (spec ci-parity). Opt in with `git config core.hooksPath scripts/git-hooks`;
+# `git push --no-verify` bypasses it.
+#
+# Scans the commits being pushed that the remote being pushed to doesn't
+# already have (by its remote-tracking refs), with the settings of
+# .github/workflows/security.yml: gitleaks's default rules, an empty ignore file
+# (both written to a temporary directory, so the repo's own .gitleaks.toml and
+# .gitleaksignore are not read) and gitleaks:allow comments ignored.
+#
+# gitleaks's default path allowlist (images, lockfiles such as package-lock.json
+# and go.sum, ...) still applies, as in CI.
+#
+# gitleaks 8.30.1 reports "no leaks found" and exits 0 when the git command it
+# runs fails or prints a warning, when git colours its output, and when a
+# .gitattributes marks a file binary or non-diffable. Git also shows nothing
+# for a merge commit's own changes (a secret added while resolving a merge),
+# for a root commit when log.showRoot is false, or for a commit that a
+# replace ref hides. So the scan is run with attributes read from the empty
+# tree, replace refs off, git told to print plain text, merges diffed against
+# their first parent and root commits shown, and the result is only trusted if
+# gitleaks exits 0, logged no error and scanned at least one commit whenever a
+# pushed commit changes a file. Anything else blocks the push.
+set -eu
+
+# Keep in step with GITLEAKS_VERSION in .github/workflows/security.yml
+# (tests/test_ci_parity.py checks).
+GITLEAKS_VERSION="8.30.1"
+
+# The empty tree: git reads no .gitattributes from the worktree or any commit.
+EMPTY_TREE="4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+# Replace refs would show git something other than the pushed commits.
+GIT_NO_REPLACE_OBJECTS=1
+export GIT_NO_REPLACE_OBJECTS
+
+# A 40-hex object name that is also a branch name only warns; that warning
+# would be read as a scan failure, and git uses the object name either way.
+GIT_CONFIG_COUNT=1
+GIT_CONFIG_KEY_0=core.warnAmbiguousRefs
+GIT_CONFIG_VALUE_0=false
+export GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+
+# Only the pushed remote's tracking refs count as "already there". $1 is its
+# name, or its URL when pushed to a URL; the name lands inside a git option, so
+# anything but a plain name excludes nothing (everything reachable is scanned).
+case "${1:-}" in
+    '' | *[!A-Za-z0-9._-]*) exclude="" ;;
+    *) exclude="--not --remotes=$1" ;;
+esac
+
+# git feeds one line per ref: <local ref> <local sha> <remote ref> <remote sha>.
+tips=""
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+    case "$local_sha" in
+        '' | *[!0-9a-fA-F]*)
+            echo "pre-push: unexpected object name from git; blocking the push." >&2
+            exit 1
+            ;;
+        *[!0]*) tips="${tips:+$tips }$local_sha" ;;
+        *) ;; # all zeros: a branch deletion, nothing to scan
+    esac
+done
+
+if [ -z "$tips" ]; then
+    exit 0
+fi
+
+# $tips is hex object names only (checked above) and $exclude is built from a
+# validated name, so splitting them is safe. A failing git blocks the push (set -e).
+revs="$tips $exclude"
+changes="$(git log --diff-merges=first-parent --root --no-color --format= --raw $revs)"
+if [ -z "$changes" ]; then
+    exit 0 # nothing new, or only empty commits and merges that change nothing against their first parent
+fi
+
+hint="Install gitleaks ${GITLEAKS_VERSION} (https://github.com/gitleaks/gitleaks/releases/tag/v${GITLEAKS_VERSION}), or push with --no-verify."
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+    echo "pre-push: gitleaks is not installed. $hint" >&2
+    exit 1
+fi
+found="$(gitleaks version 2>/dev/null || true)"
+if [ "$found" != "$GITLEAKS_VERSION" ]; then
+    echo "pre-push: gitleaks version is '${found}', CI uses ${GITLEAKS_VERSION}. $hint" >&2
+    exit 1
+fi
+
+config_dir="$(mktemp -d "${TMPDIR:-/tmp}/deal-hunter-gitleaks.XXXXXX")"
+cleanup() { rm -r -f "$config_dir"; }
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+printf '[extend]\nuseDefault = true\n' >"$config_dir/gitleaks.toml"
+: >"$config_dir/.gitleaksignore"
+log="$config_dir/gitleaks.log"
+
+status=0
+GIT_ATTR_SOURCE="$EMPTY_TREE" gitleaks git . --redact --no-banner --no-color \
+    --config "$config_dir/gitleaks.toml" \
+    --gitleaks-ignore-path "$config_dir" \
+    --ignore-gitleaks-allow \
+    --log-opts "--no-color --text --no-textconv --no-ext-diff --root --diff-merges=first-parent $revs" \
+    >"$log" 2>&1 || status=$?
+cat "$log" >&2
+
+if [ "$status" -ne 0 ]; then
+    echo "pre-push: gitleaks blocked the push (exit $status). Remove the secret from the commits (rewrite them) or push with --no-verify." >&2
+    exit 1
+fi
+if grep -q ' ERR ' "$log"; then
+    echo "pre-push: gitleaks logged an error, so its result can't be trusted; blocking the push." >&2
+    exit 1
+fi
+scanned="$(sed -n 's/^.* INF \([0-9][0-9]*\) commits scanned\.$/\1/p' "$log")"
+case "$scanned" in
+    '' | 0 | *[!0-9]*)
+        echo "pre-push: gitleaks scanned no commits although the push changes files; blocking the push." >&2
+        exit 1
+        ;;
+    *) ;;
+esac

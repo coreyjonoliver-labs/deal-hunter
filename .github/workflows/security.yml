@@ -46,16 +46,51 @@ jobs:
           printf '[extend]\nuseDefault = true\n' > gitleaks-config/gitleaks.toml
           : > gitleaks-config/.gitleaksignore
       # `git` scans every commit, so a secret added and removed within a PR
-      # still fails. The scanned tree can't switch the scan off: the config
-      # and the (empty) ignore file come from here, not the repo's
+      # still fails. The scanned tree can't switch the scan off by its config:
+      # the config and the (empty) ignore file come from here, not the repo's
       # .gitleaks.toml / .gitleaksignore, and gitleaks:allow comments are
       # ignored.
+      #
+      # gitleaks 8.30.1 also reports "no leaks found" and exits 0 when the git
+      # command it runs fails or warns, or shows a file as "Binary files
+      # differ", and a PR can cause either with a .gitattributes (a negative
+      # pattern such as `!x foo`, or `* -diff`). Git also shows no diff for a
+      # merge commit's own changes (a secret added while resolving a merge)
+      # unless asked. So git reads attributes from the empty tree, ignores
+      # replace refs, prints plain text, diffs merges against their first
+      # parent and shows root commits, and the scan fails unless gitleaks
+      # exits 0, logs no error and scans at least one commit (a checkout
+      # always has some). gitleaks's default path allowlist (images, lockfiles
+      # such as package-lock.json and go.sum, ...) still applies.
+      # tests/test_ci_parity.py runs this step.
       - name: gitleaks
+        env:
+          GIT_ATTR_SOURCE: "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+          GIT_NO_REPLACE_OBJECTS: "1"
         run: |
-          "$RUNNER_TEMP/gitleaks" git . --redact --no-banner \
+          status=0
+          "$RUNNER_TEMP/gitleaks" git . --redact --no-banner --no-color \
             --config "$RUNNER_TEMP/gitleaks-config/gitleaks.toml" \
             --gitleaks-ignore-path "$RUNNER_TEMP/gitleaks-config" \
-            --ignore-gitleaks-allow
+            --ignore-gitleaks-allow \
+            --log-opts "--all --full-history --no-color --text --no-textconv --no-ext-diff --root --diff-merges=first-parent" \
+            >"$RUNNER_TEMP/gitleaks.log" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/gitleaks.log"
+          if [ "$status" -ne 0 ]; then
+            echo "gitleaks exited $status"
+            exit 1
+          fi
+          if grep -q ' ERR ' "$RUNNER_TEMP/gitleaks.log"; then
+            echo "gitleaks logged an error, so its result can't be trusted"
+            exit 1
+          fi
+          scanned="$(sed -n 's/^.* INF \([0-9][0-9]*\) commits scanned\.$/\1/p' "$RUNNER_TEMP/gitleaks.log")"
+          case "$scanned" in
+            '' | 0 | *[!0-9]*)
+              echo "gitleaks scanned no commits"
+              exit 1
+              ;;
+          esac
 
   dependency-review:
     if: github.event_name == 'pull_request'

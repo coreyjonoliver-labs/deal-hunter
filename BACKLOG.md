@@ -42,10 +42,10 @@ spec each.
 
 ## Up Next
 
-- [ ] promtool-in-ci — `tests/test_deploy.py::test_prometheus_rules_pass_their_unit_tests`
+- [x] promtool-in-ci — `tests/test_deploy.py::test_prometheus_rules_pass_their_unit_tests`
   skips without promtool, so the alert-rule unit tests (`rules.test.yaml`) never
   run in CI; install promtool in `build.yml` (workflow change: operator-only)
-- [ ] conventions-ops-metrics — add to the conventions skill: the `metrics`
+- [x] conventions-ops-metrics — add to the conventions skill: the `metrics`
   module; `notification` events from `launch.py` patch 10; the metrics port's
   IP-literal/allowed-host rule; `send_message_with_retry` and
   `send_email_message` in the bump-aimm patch list (skill dir: operator-only)
@@ -53,6 +53,12 @@ spec each.
   the processor), the `tracing` module, `TraceTap`, the four tracing patch
   points (`search_item`, `get_listing_details`, `OpenAIBackend.evaluate`,
   `AnthropicBackend.evaluate`) in the bump-aimm list, doc-table rows
+- [ ] ci-parity-followups — the pre-push hook blocks a push whose only new
+  commits delete, 100%-rename or chmod files (gitleaks counts 0 commits with no
+  added hunk): pre-check added lines with `--numstat` instead of `--raw`, with
+  delete/rename/mode-only tests; add octopus, first-parent-is-side and
+  second-parent-on-remote merges to `BYPASSES` in `tests/test_ci_parity.py`;
+  `--remotes=<name>` also matches `refs/remotes/<name>/x/*`
 - [ ] tracing-followups — `ExportErrors` labels every `opentelemetry` WARNING
   as an export failure, so a bad `OTEL_RESOURCE_ATTRIBUTES` at setup prints a
   false "couldn't export" and uses up the once-a-minute slot (give config
